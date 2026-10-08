@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: progress-tracker-api
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: NODE_ENV
+        value: production
+
+  - type: web
+    name: progress-tracker-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://progress-tracker-api.onrender.com
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

@@ -211,11 +211,23 @@ const DashboardLayout = () => {
             </main>
 
             {/* FLOATING BOTTOM NAV (MOBILE) */}
-            <nav className="bottom-nav">
-                <NavLink to="/" end className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}><span className="icon">🏠</span></NavLink>
-                <NavLink to="/routine" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}><span className="icon">☑️</span></NavLink>
-                <NavLink to="/finance" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}><span className="icon">💰</span></NavLink>
-                <NavLink to="/settings" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}><span className="icon">⚙️</span></NavLink>
+            <nav className="bottom-nav" aria-label="Primary navigation">
+                <NavLink to="/" end aria-label="Home" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}>
+                    <span className="icon" aria-hidden="true">🏠</span>
+                    <span className="nav-label">Home</span>
+                </NavLink>
+                <NavLink to="/routine" aria-label="Routine" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}>
+                    <span className="icon" aria-hidden="true">☑️</span>
+                    <span className="nav-label">Routine</span>
+                </NavLink>
+                <NavLink to="/finance" aria-label="Finance" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}>
+                    <span className="icon" aria-hidden="true">💰</span>
+                    <span className="nav-label">Finance</span>
+                </NavLink>
+                <NavLink to="/settings" aria-label="Settings" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}>
+                    <span className="icon" aria-hidden="true">⚙️</span>
+                    <span className="nav-label">Settings</span>
+                </NavLink>
             </nav>
         </div>
     );
