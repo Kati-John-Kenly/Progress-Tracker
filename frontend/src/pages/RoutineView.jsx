@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import { useContext, useState, useEffect, useRef } from 'react';
+import { GripVertical } from 'lucide-react';
+import { AuthContext } from '../context/AuthState';
 
 export default function RoutineView() {
+    const { syncData } = useContext(AuthContext);
     // --- STATE MANAGEMENT ---
-    const [tasks, setTasks] = useState([]);
+    const [tasks, setTasks] = useState(() => JSON.parse(localStorage.getItem('hybridRoutineTasks')) || []);
     const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
     
     // Calendar View State
@@ -13,23 +16,56 @@ export default function RoutineView() {
     const [newStartTime, setNewStartTime] = useState('');
     const [newEndTime, setNewEndTime] = useState('');
     const [selectedColor, setSelectedColor] = useState('#3b82f6'); 
+    const colorInputRef = useRef(null);
+    const draggedTaskIdRef = useRef(null);
+    const dragOverTaskIdRef = useRef(null);
+    const dailyTasksRef = useRef([]);
+    const currentDateRef = useRef(currentDate);
+    const [draggingTaskId, setDraggingTaskId] = useState(null);
 
-    // Load & Save LocalStorage
-    useEffect(() => {
-        const savedTasks = JSON.parse(localStorage.getItem('hybridRoutineTasks')) || [];
-        setTasks(savedTasks);
-    }, []);
-
+    // Save LocalStorage
     useEffect(() => {
         localStorage.setItem('hybridRoutineTasks', JSON.stringify(tasks));
     }, [tasks]);
 
     // --- DERIVED STATE ---
     const dailyTasks = tasks.filter(t => t.date === currentDate).sort((a, b) => {
+        if (Number.isInteger(a.order) && Number.isInteger(b.order)) return a.order - b.order;
+        if (Number.isInteger(a.order)) return -1;
+        if (Number.isInteger(b.order)) return 1;
         if (!a.start) return 1;
         if (!b.start) return -1;
         return a.start.localeCompare(b.start);
     });
+
+    useEffect(() => {
+        dailyTasksRef.current = dailyTasks;
+        currentDateRef.current = currentDate;
+    }, [dailyTasks, currentDate]);
+
+    const saveTasks = (updatedTasks) => {
+        setTasks(updatedTasks);
+        void syncData({ routineTasks: updatedTasks });
+    };
+
+    const finishTaskReorder = (targetId) => {
+        const draggedId = draggedTaskIdRef.current;
+        if (draggedId !== null && draggedId !== targetId) {
+            const reordered = [...dailyTasksRef.current];
+            const fromIndex = reordered.findIndex(task => task.id === draggedId);
+            const toIndex = reordered.findIndex(task => task.id === targetId);
+            if (fromIndex !== -1 && toIndex !== -1) {
+                const [movedTask] = reordered.splice(fromIndex, 1);
+                reordered.splice(toIndex, 0, movedTask);
+                const orderById = new Map(reordered.map((task, index) => [task.id, index]));
+                const date = currentDateRef.current;
+                saveTasks(tasks.map(task => task.date === date ? { ...task, order: orderById.get(task.id) } : task));
+            }
+        }
+        draggedTaskIdRef.current = null;
+        dragOverTaskIdRef.current = null;
+        setDraggingTaskId(null);
+    };
 
     // --- HANDLERS ---
     const handleAddTask = (e) => {
@@ -39,6 +75,7 @@ export default function RoutineView() {
         const newTask = {
             id: Date.now(),
             date: currentDate,
+            order: dailyTasks.length,
             title: newTaskName.trim(),
             start: newStartTime,
             end: newEndTime,
@@ -46,14 +83,15 @@ export default function RoutineView() {
             completed: false
         };
 
-        setTasks([...tasks, newTask]);
+        const orderById = new Map(dailyTasks.map((task, index) => [task.id, index]));
+        saveTasks([...tasks.map(task => task.date === currentDate ? { ...task, order: orderById.get(task.id) } : task), newTask]);
         setNewTaskName('');
         setNewStartTime('');
         setNewEndTime('');
     };
 
-    const toggleTask = (id) => setTasks(tasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
-    const deleteTask = (id) => setTasks(tasks.filter(t => t.id !== id));
+    const toggleTask = (id) => saveTasks(tasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
+    const deleteTask = (id) => saveTasks(tasks.filter(t => t.id !== id));
 
     const loadTemplate = (type) => {
         let templateData = [];
@@ -75,18 +113,20 @@ export default function RoutineView() {
         const newTasks = templateData.map((t, index) => ({
             id: Date.now() + index,
             date: currentDate,
+            order: dailyTasks.length + index,
             title: t.title,
             start: t.start,
             end: t.end,
             color: t.color,
             completed: false
         }));
-        setTasks([...tasks, ...newTasks]);
+        const orderById = new Map(dailyTasks.map((task, index) => [task.id, index]));
+        saveTasks([...tasks.map(task => task.date === currentDate ? { ...task, order: orderById.get(task.id) } : task), ...newTasks]);
     };
 
     const resetTemplate = () => {
         if (window.confirm('Clear today\'s schedule?')) {
-            setTasks(tasks.filter(t => t.date !== currentDate));
+            saveTasks(tasks.filter(t => t.date !== currentDate));
         }
     };
 
@@ -111,7 +151,6 @@ export default function RoutineView() {
     });
 
     const loggedHours = (totalLoggedMinutes / 60).toFixed(1);
-    const progressPercentage = Math.min((totalLoggedMinutes / (24 * 60)) * 100, 100);
 
     // --- CALENDAR RENDERER ---
     const currentMonth = viewDate.getMonth();
@@ -227,8 +266,11 @@ export default function RoutineView() {
                             dailyTasks.map(task => {
                                 const timeDisplay = formatTimeDisplay(task.start, task.end);
                                 return (
-                                    <div key={task.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderLeft: `6px solid ${task.color}`, borderRadius: '12px', boxShadow: '0 4px 6px rgba(0,0,0,0.2)' }}>
+                                    <div key={task.id} data-task-id={task.id} onDragOver={(event) => { event.preventDefault(); dragOverTaskIdRef.current = task.id; }} onDrop={(event) => { event.preventDefault(); finishTaskReorder(task.id); }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderLeft: `6px solid ${task.color}`, borderRadius: '12px', boxShadow: '0 4px 6px rgba(0,0,0,0.2)', opacity: draggingTaskId === task.id ? 0.65 : 1, outline: draggingTaskId === task.id ? '2px solid var(--primary)' : 'none' }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                            <button type="button" draggable="true" className="task-reorder-handle" aria-label={`Reorder ${task.title}`} title="Long press and drag to reorder" onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', String(task.id)); draggedTaskIdRef.current = task.id; setDraggingTaskId(task.id); }} onDragEnd={() => { draggedTaskIdRef.current = null; dragOverTaskIdRef.current = null; setDraggingTaskId(null); }}>
+                                                <GripVertical size={18} aria-hidden="true" />
+                                            </button>
                                             <div onClick={() => toggleTask(task.id)} style={{ width: '24px', height: '24px', borderRadius: '50%', border: `2px solid ${task.completed ? 'var(--success)' : task.color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', background: task.completed ? 'var(--success)' : 'transparent', cursor: 'pointer', flexShrink: 0 }}>
                                                 {task.completed && <span style={{ color: 'var(--bg-dark)', fontSize: '0.8rem', fontWeight: 'bold' }}>✓</span>}
                                             </div>
@@ -255,8 +297,9 @@ export default function RoutineView() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             <label style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: '500' }}>Task Name & Color</label>
                             <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                                <div style={{ position: 'relative', width: '50px', height: '50px', borderRadius: '12px', overflow: 'hidden', border: '2px solid var(--border)', cursor: 'pointer', flexShrink: 0, background: selectedColor }} title="Choose Task Color">
-                                    <input type="color" value={selectedColor} onChange={(e) => setSelectedColor(e.target.value)} style={{ opacity: 0, width: '100%', height: '100%', cursor: 'pointer', position: 'absolute', top: 0, left: 0 }} />
+                                <div style={{ position: 'relative', width: '50px', height: '50px', flexShrink: 0 }}>
+                                    <button type="button" aria-label="Choose task color" title="Choose task color" onClick={() => colorInputRef.current?.showPicker ? colorInputRef.current.showPicker() : colorInputRef.current?.click()} style={{ width: '100%', height: '100%', borderRadius: '12px', border: '2px solid var(--border)', cursor: 'pointer', background: selectedColor }} />
+                                    <input ref={colorInputRef} type="color" aria-label="Task color" value={selectedColor} onChange={(e) => setSelectedColor(e.target.value)} style={{ opacity: 0, width: '1px', height: '1px', position: 'absolute', top: '50%', left: '50%', pointerEvents: 'none' }} />
                                 </div>
                                 <input type="text" value={newTaskName} onChange={(e) => setNewTaskName(e.target.value)} placeholder="What are you working on?" required className="sleek-input" style={{ flexGrow: 1, marginBottom: 0, padding: '15px', fontSize: '1.05rem', borderRadius: '12px' }} />
                             </div>

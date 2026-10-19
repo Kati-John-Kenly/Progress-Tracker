@@ -1,163 +1,214 @@
-import React, { useState, useContext, useEffect } from 'react';
-import { AuthContext } from '../context/AuthContext';
+import { useContext, useEffect, useState } from 'react';
+import { SignIn, SignUp } from '@clerk/react';
+import {
+    Check,
+    Cloud,
+    Download,
+    LogOut,
+    Moon,
+    Palette,
+    ShieldCheck,
+    Sun,
+    Upload,
+    UserRound,
+} from 'lucide-react';
+import { AuthContext } from '../context/AuthState';
+
+const backupFormat = 'progress-workspace-backup';
 
 export default function SettingsView() {
-    const { user, login, register, logout } = useContext(AuthContext);
-    
-    // Auth Form State
-    const [isLoginView, setIsLoginView] = useState(true);
-    const [name, setName] = useState('');
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [pin, setPin] = useState('');
+    const { user, logout, loading, configured, syncError, syncData } = useContext(AuthContext);
+    const [authMode, setAuthMode] = useState('sign-in');
+    const [theme, setTheme] = useState(() => localStorage.getItem('appTheme') || 'dark');
+    const [backupFile, setBackupFile] = useState(null);
+    const [backupMessage, setBackupMessage] = useState('');
+    const [backupError, setBackupError] = useState(false);
 
-    // Theme State
-    const [theme, setTheme] = useState(localStorage.getItem('appTheme') || 'dark');
-
-    // Apply theme to the entire app body when toggled
     useEffect(() => {
-        if (theme === 'light') {
-            document.body.classList.add('light-theme');
-        } else {
-            document.body.classList.remove('light-theme');
-        }
+        document.body.classList.toggle('light-theme', theme === 'light');
         localStorage.setItem('appTheme', theme);
     }, [theme]);
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
+    const changeTheme = (nextTheme) => {
+        setTheme(nextTheme);
+        void syncData({ appTheme: nextTheme });
+    };
+
+    const downloadBackup = () => {
+        const backup = {
+            format: backupFormat,
+            version: 1,
+            exportedAt: new Date().toISOString(),
+            data: {
+                hybridRoutineTasks: JSON.parse(localStorage.getItem('hybridRoutineTasks') || '[]'),
+                financeData: JSON.parse(localStorage.getItem('financeData') || '[]'),
+                financeCategories: JSON.parse(localStorage.getItem('financeCategories') || '[]'),
+                appTheme: localStorage.getItem('appTheme') || 'dark',
+            },
+        };
+        const file = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(file);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `progress-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+        setBackupError(false);
+        setBackupMessage('Backup downloaded. Account credentials are not included.');
+    };
+
+    const restoreBackup = async () => {
+        if (!backupFile) return;
+        setBackupMessage('');
+        setBackupError(false);
         try {
-            if (isLoginView) {
-                await login(email, password);
-            } else {
-                await register(name, email, password, pin);
+            const backup = JSON.parse(await backupFile.text());
+            const data = backup?.data;
+            if (backup?.format !== backupFormat || backup.version !== 1 || !data
+                || !Array.isArray(data.hybridRoutineTasks)
+                || !Array.isArray(data.financeData)
+                || !Array.isArray(data.financeCategories)
+                || !['dark', 'light'].includes(data.appTheme)) {
+                throw new Error('This file is not a supported Progress backup.');
             }
-        } catch (err) {
-            alert(err.response?.data?.message || 'Authentication failed. Make sure backend is running.');
+            if (!window.confirm('Restore this backup? Current routine, finance, and theme data will be replaced.')) return;
+            localStorage.setItem('hybridRoutineTasks', JSON.stringify(data.hybridRoutineTasks));
+            localStorage.setItem('financeData', JSON.stringify(data.financeData));
+            localStorage.setItem('financeCategories', JSON.stringify(data.financeCategories));
+            localStorage.setItem('appTheme', data.appTheme);
+            if (user) {
+                const synced = await syncData({
+                    routineTasks: data.hybridRoutineTasks,
+                    financeData: data.financeData,
+                    financeCategories: data.financeCategories,
+                    appTheme: data.appTheme,
+                });
+                if (!synced) throw new Error('Backup restored on this device, but cloud sync failed. Try Sync now before leaving.');
+            }
+            window.location.reload();
+        } catch (error) {
+            setBackupError(true);
+            setBackupMessage(error.message || 'Could not read this backup file.');
         }
     };
 
+    const switchAuthMode = (mode) => {
+        setAuthMode(mode);
+    };
+
+    const initials = user?.name?.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase() || 'U';
+
     return (
         <div className="view-section active">
-            <div className="dashboard" style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
-                
-                {/* COLUMN 1: ACCOUNT & CLOUD SYNC */}
-                <div className="column" style={{ flex: 1, minWidth: '320px' }}>
-                    <div className="card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                        <h2 style={{ marginBottom: '25px', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '1.4rem' }}>
-                            ☁️ Cloud Sync & Account
-                        </h2>
-                        
-                        {user ? (
-                            // --- SUCCESSFUL LOGIN VIEW ---
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', flex: 1 }}>
-                                <div style={{ background: 'rgba(16, 185, 129, 0.1)', padding: '30px 20px', borderRadius: '16px', border: '1px solid var(--success)', textAlign: 'center', animation: 'fadeIn 0.5s ease' }}>
-                                    <div style={{ fontSize: '3.5rem', marginBottom: '15px', textShadow: '0 0 20px rgba(16, 185, 129, 0.4)' }}>✅</div>
-                                    <h3 style={{ color: 'var(--success)', margin: '0 0 10px 0', fontSize: '1.3rem' }}>Login Successful!</h3>
-                                    <p style={{ color: 'var(--text-main)', fontSize: '1.1rem', margin: '0 0 5px 0' }}>Welcome back, <strong>{user.name}</strong></p>
-                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', margin: 0 }}>{user.email}</p>
-                                </div>
-                                
-                                <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', textAlign: 'center', lineHeight: '1.6', margin: '10px 0' }}>
-                                    Your routines and finances are actively backing up to the cloud. Your progress is secure.
-                                </p>
-                                
-                                <div style={{ marginTop: 'auto' }}>
-                                    <button onClick={logout} className="primary-btn-large" style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger)', border: '1px solid rgba(239, 68, 68, 0.3)', width: '100%' }}>
-                                        🚪 Log Out & Stop Sync
-                                    </button>
-                                </div>
-                            </div>
-                        ) : (
-                            // --- GUEST / LOGIN VIEW ---
-                            <div>
-                                <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', marginBottom: '25px', lineHeight: '1.6' }}>
-                                    Create a free account to securely backup your progress to the cloud and sync across devices.
-                                </p>
-                                
-                                <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                                    {!isLoginView && (
-                                        <input className="sleek-input" type="text" placeholder="Full Name" required onChange={e => setName(e.target.value)} style={{ marginBottom: 0, padding: '14px' }} />
-                                    )}
-                                    <input className="sleek-input" type="email" placeholder="Email Address" required onChange={e => setEmail(e.target.value)} style={{ marginBottom: 0, padding: '14px' }} />
-                                    <input className="sleek-input" type="password" placeholder="Password" required onChange={e => setPassword(e.target.value)} style={{ marginBottom: 0, padding: '14px' }} />
-                                    {!isLoginView && (
-                                        <input className="sleek-input text-center" type="password" placeholder="Create 4-Digit PIN" maxLength="4" required onChange={e => setPin(e.target.value)} style={{ fontSize: '1.2rem', letterSpacing: '8px', marginBottom: 0, padding: '14px' }} />
-                                    )}
-                                    
-                                    <button className="primary-btn-large" type="submit" style={{ marginTop: '10px', padding: '16px', fontSize: '1.05rem' }}>
-                                        {isLoginView ? 'Sign In & Sync' : 'Create Account'}
-                                    </button>
-                                </form>
-
-                                <button 
-                                    type="button" 
-                                    style={{ background: 'transparent', color: 'var(--text-muted)', marginTop: '20px', width: '100%', border: 'none', cursor: 'pointer', fontSize: '0.95rem', padding: '10px' }} 
-                                    onClick={() => setIsLoginView(!isLoginView)}
-                                >
-                                    {isLoginView ? "Need an account? Sign Up" : "Already have an account? Log In"}
-                                </button>
-                            </div>
-                        )}
-                    </div>
+            <div className="settings-page">
+                <div className="settings-intro">
+                    <p className="settings-eyebrow">PREFERENCES & ACCOUNT</p>
+                    <h2>Make it yours</h2>
+                    <p>Manage your account, appearance, and personal data from one place.</p>
                 </div>
 
-                {/* COLUMN 2: PREFERENCES & BACKUP */}
-                <div className="column" style={{ flex: 1, minWidth: '320px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-                    
-                    {/* THEME TOGGLES */}
-                    <div className="card">
-                        <h2 style={{ marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '1.3rem' }}>
-                            🎨 App Theme
-                        </h2>
-                        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '20px' }}>Customize the look and feel of your dashboard.</p>
-                        
-                        <div style={{ display: 'flex', gap: '15px' }}>
-                            <button 
-                                onClick={() => setTheme('dark')}
-                                style={{ 
-                                    flex: 1, padding: '20px 10px', background: '#09090b', 
-                                    border: theme === 'dark' ? '2px solid var(--primary)' : '2px solid var(--border)', 
-                                    borderRadius: '12px', color: '#fff', cursor: 'pointer', transition: 'all 0.2s'
-                                }}>
-                                <div style={{ fontSize: '1.8rem', marginBottom: '8px' }}>🌙</div>
-                                <strong style={{ display: 'block', fontSize: '0.95rem' }}>OLED Dark</strong>
-                            </button>
-                            
-                            <button 
-                                onClick={() => setTheme('light')}
-                                style={{ 
-                                    flex: 1, padding: '20px 10px', background: '#f8fafc', 
-                                    border: theme === 'light' ? '2px solid var(--primary)' : '2px solid #cbd5e1', 
-                                    borderRadius: '12px', color: '#0f172a', cursor: 'pointer', transition: 'all 0.2s'
-                                }}>
-                                <div style={{ fontSize: '1.8rem', marginBottom: '8px' }}>☀️</div>
-                                <strong style={{ display: 'block', fontSize: '0.95rem' }}>Light Mode</strong>
-                            </button>
+                <section className="card settings-panel settings-account" aria-labelledby="settings-account-title">
+                    <div className="settings-section-heading">
+                        <span className="settings-icon"><UserRound size={19} aria-hidden="true" /></span>
+                        <div>
+                            <h3 id="settings-account-title">Account</h3>
+                            <p>Sign in details and account access</p>
                         </div>
                     </div>
 
-                    {/* LOCAL BACKUP */}
-                    <div className="card">
-                        <h2 style={{ marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '1.3rem' }}>
-                            💾 Local Backup
-                        </h2>
-                        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '20px' }}>Download a manual offline copy of your data, or restore from a previous file.</p>
-                        
-                        <button style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-main)', marginBottom: '20px', width: '100%', padding: '14px', borderRadius: '12px', border: '1px solid var(--border)', fontWeight: 'bold', cursor: 'pointer', transition: 'background 0.2s' }}>
-                            📥 Download Backup JSON
+                    {loading ? (
+                        <p className="settings-notice" role="status">Checking saved account…</p>
+                    ) : user ? (
+                        <div className="account-content">
+                            <div className="account-identity">
+                                <div className="account-avatar" aria-hidden="true">{initials}</div>
+                                <div className="account-copy">
+                                    <strong>{user.name || 'Progress user'}</strong>
+                                    <span>{user.email || 'No email address on file'}</span>
+                                </div>
+                                <span className="account-status"><Check size={14} aria-hidden="true" /> Signed in</span>
+                            </div>
+                            <div className="account-note">
+                                <Cloud size={17} aria-hidden="true" />
+                                <p>Your account is connected. Routine and finance records sync securely to your workspace.</p>
+                            </div>
+                            {syncError && <p className="settings-notice is-error" role="alert">{syncError}</p>}
+                            <button type="button" className="settings-button settings-button-secondary" onClick={syncData}>
+                                <Cloud size={17} aria-hidden="true" /> Sync now
+                            </button>
+                            <button type="button" className="settings-button settings-button-danger" onClick={logout}>
+                                <LogOut size={17} aria-hidden="true" /> Sign out
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="account-content">
+                            {!configured ? (
+                                <p className="settings-notice is-error" role="status">Account sign-in is unavailable until this deployment is configured with Clerk. Your local data remains available on this device.</p>
+                            ) : (
+                                <>
+                                    <p className="settings-description">Sign in to your Progress account or create one. Your personal data will sync after your account is ready.</p>
+                                    <div className="settings-segmented" role="tablist" aria-label="Account action">
+                                        <button type="button" role="tab" aria-selected={authMode === 'sign-in'} className={authMode === 'sign-in' ? 'selected' : ''} onClick={() => switchAuthMode('sign-in')}>Sign in</button>
+                                        <button type="button" role="tab" aria-selected={authMode === 'sign-up'} className={authMode === 'sign-up' ? 'selected' : ''} onClick={() => switchAuthMode('sign-up')}>Create account</button>
+                                    </div>
+                                    <div className="clerk-auth-panel">
+                                        {authMode === 'sign-in'
+                                            ? <SignIn routing="virtual" />
+                                            : <SignUp routing="virtual" />}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    )}
+                </section>
+
+                <section className="card settings-panel" aria-labelledby="settings-appearance-title">
+                    <div className="settings-section-heading">
+                        <span className="settings-icon"><Palette size={19} aria-hidden="true" /></span>
+                        <div>
+                            <h3 id="settings-appearance-title">Appearance</h3>
+                            <p>Choose how Progress looks on this device</p>
+                        </div>
+                    </div>
+                    <div className="theme-options" role="group" aria-label="Theme">
+                        <button type="button" className={`theme-option ${theme === 'dark' ? 'selected' : ''}`} aria-pressed={theme === 'dark'} onClick={() => changeTheme('dark')}>
+                            <Moon size={20} aria-hidden="true" />
+                            <span><strong>OLED dark</strong><small>Low-light workspace</small></span>
+                            {theme === 'dark' && <Check className="theme-check" size={17} aria-hidden="true" />}
                         </button>
-                        
-                        <hr style={{ borderTop: '1px solid var(--border)', borderBottom: 'none', marginBottom: '20px' }} />
-                        
-                        <label style={{ fontWeight: 'bold', marginBottom: '10px', display: 'block', fontSize: '0.95rem', color: 'var(--text-muted)' }}>Restore from File:</label>
-                        <input type="file" accept=".json" className="sleek-input" style={{ marginBottom: '15px', padding: '12px' }} />
-                        <button className="primary-btn-large" style={{ background: 'var(--text-main)', color: 'var(--bg-dark)', width: '100%' }}>
-                            📤 Restore Data
+                        <button type="button" className={`theme-option ${theme === 'light' ? 'selected' : ''}`} aria-pressed={theme === 'light'} onClick={() => changeTheme('light')}>
+                            <Sun size={20} aria-hidden="true" />
+                            <span><strong>Light</strong><small>Bright workspace</small></span>
+                            {theme === 'light' && <Check className="theme-check" size={17} aria-hidden="true" />}
                         </button>
                     </div>
-                </div>
+                </section>
 
+                <section className="card settings-panel settings-data" aria-labelledby="settings-data-title">
+                    <div className="settings-section-heading">
+                        <span className="settings-icon"><ShieldCheck size={19} aria-hidden="true" /></span>
+                        <div>
+                            <h3 id="settings-data-title">Data & privacy</h3>
+                            <p>Export or restore this device’s local data</p>
+                        </div>
+                    </div>
+                    <div className="data-includes">
+                        <span>Included in backup</span>
+                        <p>Routine tasks <i /> Finance records <i /> Categories <i /> Theme</p>
+                    </div>
+                    <button type="button" className="settings-button settings-button-secondary" onClick={downloadBackup}>
+                        <Download size={17} aria-hidden="true" /> Download backup
+                    </button>
+                    <label className="settings-field settings-file-field">
+                        <span>Choose a Progress backup (.json)</span>
+                        <input type="file" accept=".json,application/json" onChange={event => { setBackupFile(event.target.files?.[0] || null); setBackupMessage(''); }} />
+                    </label>
+                    <button type="button" className="settings-button settings-button-primary" onClick={restoreBackup} disabled={!backupFile}>
+                        <Upload size={17} aria-hidden="true" /> Restore backup
+                    </button>
+                    <p className="settings-privacy-note">Account credentials are never included in backups. Restoring replaces the local data listed above.</p>
+                    {backupMessage && <p className={`settings-notice ${backupError ? 'is-error' : ''}`} role={backupError ? 'alert' : 'status'}>{backupMessage}</p>}
+                </section>
             </div>
         </div>
     );

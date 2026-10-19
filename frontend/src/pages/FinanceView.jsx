@@ -1,14 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import { useContext, useState, useEffect } from 'react';
 import { Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
+import { AuthContext } from '../context/AuthState';
 
 // Register ChartJS elements
 ChartJS.register(ArcElement, Tooltip, Legend);
 
 export default function FinanceView() {
+    const { syncData } = useContext(AuthContext);
     // --- STATE MANAGEMENT ---
-    const [financeData, setFinanceData] = useState([]);
-    const [customCategories, setCustomCategories] = useState([]);
+    const [financeData, setFinanceData] = useState(() => JSON.parse(localStorage.getItem('financeData') || '[]'));
+    const [customCategories, setCustomCategories] = useState(() => JSON.parse(localStorage.getItem('financeCategories') || '[]'));
     
     // Form State
     const [finType, setFinType] = useState('expense');
@@ -19,14 +21,6 @@ export default function FinanceView() {
     
     // Calendar View State
     const [viewDate, setViewDate] = useState(new Date());
-
-    // Load data from LocalStorage
-    useEffect(() => {
-        const savedData = JSON.parse(localStorage.getItem('financeData')) || [];
-        const savedCats = JSON.parse(localStorage.getItem('financeCategories')) || [];
-        setFinanceData(savedData);
-        setCustomCategories(savedCats);
-    }, []);
 
     // Save to LocalStorage
     useEffect(() => {
@@ -85,11 +79,13 @@ export default function FinanceView() {
     const handleAddTransaction = (e) => {
         e.preventDefault();
         let finalCategory = category;
+        let updatedCategories = customCategories;
 
         if (category === 'add_new_cat') {
             finalCategory = newCategory.trim();
             if (finalCategory && !customCategories.includes(finalCategory)) {
-                setCustomCategories([...customCategories, finalCategory]);
+                updatedCategories = [...customCategories, finalCategory];
+                setCustomCategories(updatedCategories);
             }
         }
 
@@ -101,7 +97,9 @@ export default function FinanceView() {
             date: formDate
         };
 
-        setFinanceData([...financeData, newTransaction]);
+        const updatedFinance = [...financeData, newTransaction];
+        setFinanceData(updatedFinance);
+        void syncData({ financeData: updatedFinance, financeCategories: updatedCategories });
         
         // Reset form
         setAmount('');
@@ -110,7 +108,9 @@ export default function FinanceView() {
     };
 
     const handleDelete = (id) => {
-        setFinanceData(financeData.filter(t => t.id !== id));
+        const updatedFinance = financeData.filter(t => t.id !== id);
+        setFinanceData(updatedFinance);
+        void syncData({ financeData: updatedFinance });
     };
 
     const changeMonth = (offset) => {
