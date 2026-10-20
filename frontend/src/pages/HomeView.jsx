@@ -94,7 +94,7 @@ export default function HomeView() {
         <div className="view-section active">
             <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '15px', padding: '15px 20px', background: 'rgba(59, 130, 246, 0.05)', border: '1px solid rgba(59, 130, 246, 0.2)', marginBottom: '24px', borderRadius: '16px' }}>
                 <span style={{ fontSize: '1.8rem' }}>💡</span>
-                <p style={{ margin: 0, color: 'var(--text-main)', fontSize: '0.95rem', fontStyle: 'italic', lineHeight: '1.5' }}>"{dailyQuote}"</p>
+                <p style={{ margin: 0, color: 'var(--text-main)', fontSize: '0.95rem', fontStyle: 'italic', lineHeight: '1.5' }}>&quot;{dailyQuote}&quot;</p>
             </div>
 
             <div className="home-grid">
@@ -112,7 +112,7 @@ export default function HomeView() {
                     </div>
 
                     <div className="card">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                        <div className="home-card-heading" style={{ marginBottom: '20px' }}>
                             <h3 style={{ margin: 0, fontSize: '1.2rem' }}>☑️ Today's Focus</h3>
                             <NavLink to="/routine" style={{ color: 'var(--primary)', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 'bold', background: 'rgba(59, 130, 246, 0.1)', padding: '5px 12px', borderRadius: '20px' }}>Open Planner</NavLink>
                         </div>
@@ -150,7 +150,7 @@ export default function HomeView() {
                     
                     {/* UPDATED: Monthly Finance Snapshot WITH GRAPH */}
                     <div className="card">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                        <div className="home-card-heading" style={{ marginBottom: '24px' }}>
                             <h3 style={{ margin: 0, fontSize: '1.2rem' }}>💰 This Month</h3>
                             <NavLink to="/finance" style={{ color: 'var(--success)', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 'bold', background: 'rgba(16, 185, 129, 0.1)', padding: '5px 12px', borderRadius: '20px' }}>View Wallet</NavLink>
                         </div>

@@ -233,7 +233,7 @@ export default function RoutineView() {
                     
                     {/* Header: Date & Controls (FIXED ALIGNMENT) */}
                     <div className="card" style={{ padding: '20px', marginBottom: '24px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                        <div className="routine-schedule-heading" style={{ gap: '10px' }}>
                             <h2 style={{ margin: 0, fontSize: '1.4rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
                                 <span>📅</span> Schedule
                             </h2>
@@ -327,7 +327,7 @@ export default function RoutineView() {
                     
                     {/* NEW: Consistency Calendar */}
                     <div className="card" style={{ padding: '20px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                        <div className="routine-calendar-heading" style={{ marginBottom: '15px' }}>
                             <button onClick={() => changeMonth(-1)} style={{ background: 'transparent', color: 'var(--text-main)', border: 'none', cursor: 'pointer' }}>&lt; Prev</button>
                             <h3 style={{ margin: 0, color: 'var(--primary)', fontSize: '1.1rem' }}>{monthNames[currentMonth]} {currentYear}</h3>
                             <button onClick={() => changeMonth(1)} style={{ background: 'transparent', color: 'var(--text-main)', border: 'none', cursor: 'pointer' }}>Next &gt;</button>
@@ -346,7 +346,7 @@ export default function RoutineView() {
 
                     {/* Daily Capacity Analytics */}
                     <div className="card" style={{ padding: '24px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                        <div className="routine-capacity-heading" style={{ marginBottom: '24px' }}>
                             <h3 style={{ margin: 0, fontSize: '1.2rem' }}>⏱️ Daily Capacity</h3>
                         </div>
                         
