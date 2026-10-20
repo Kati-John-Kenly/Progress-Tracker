@@ -233,6 +233,14 @@ body { background-color: var(--bg-dark); color: var(--text-main); height: 100dvh
 .settings-notice { padding: 10px 12px; border: 1px solid rgba(16, 185, 129, 0.32); border-radius: 8px; color: var(--success); background: rgba(16, 185, 129, 0.06); font-size: 0.82rem; line-height: 1.5; }
 .settings-notice.is-error { border-color: rgba(239, 68, 68, 0.35); color: var(--danger); background: rgba(239, 68, 68, 0.06); }
 
+.finance-transactions-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 15px; }
+.finance-transactions-header h2 { font-size: 1.15rem; }
+.transaction-filters { display: flex; flex: 0 0 auto; gap: 6px; }
+.transaction-filter-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 34px; padding: 0 9px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); background: transparent; cursor: pointer; font-size: 0.76rem; font-weight: 650; }
+.transaction-filter-button.income-filter.selected { color: var(--success); border-color: rgba(16, 185, 129, 0.55); background: rgba(16, 185, 129, 0.08); }
+.transaction-filter-button.spending-filter.selected { color: var(--danger); border-color: rgba(239, 68, 68, 0.55); background: rgba(239, 68, 68, 0.08); }
+.transaction-filter-button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
 @media (max-width: 768px) {
     .settings-page { grid-template-columns: minmax(0, 1fr); gap: 14px; }
     .settings-intro, .settings-account { grid-column: auto; }
@@ -245,4 +253,7 @@ body { background-color: var(--bg-dark); color: var(--text-main); height: 100dvh
     .account-status { margin-left: 61px; }
     .settings-segmented { width: 100%; }
     .settings-segmented button { flex: 1; }
+    .finance-transactions-header { align-items: flex-start; flex-direction: column; }
+    .transaction-filters { width: 100%; }
+    .transaction-filter-button { flex: 1; }
 }

@@ -1,6 +1,7 @@
 import { useContext, useState, useEffect } from 'react';
 import { Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
+import { ArrowDownLeft, ArrowUpRight } from 'lucide-react';
 import { AuthContext } from '../context/AuthState';
 
 // Register ChartJS elements
@@ -11,6 +12,7 @@ export default function FinanceView() {
     // --- STATE MANAGEMENT ---
     const [financeData, setFinanceData] = useState(() => JSON.parse(localStorage.getItem('financeData') || '[]'));
     const [customCategories, setCustomCategories] = useState(() => JSON.parse(localStorage.getItem('financeCategories') || '[]'));
+    const [transactionFilter, setTransactionFilter] = useState('all');
     
     // Form State
     const [finType, setFinType] = useState('expense');
@@ -42,6 +44,9 @@ export default function FinanceView() {
         const d = new Date(t.date);
         return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     }).sort((a, b) => new Date(b.date) - new Date(a.date));
+    const displayedTransactions = transactionFilter === 'all'
+        ? monthlyTransactions
+        : monthlyTransactions.filter(transaction => transaction.type === transactionFilter);
 
     monthlyTransactions.forEach(t => {
         if (t.type === 'income') {
@@ -111,6 +116,10 @@ export default function FinanceView() {
         const updatedFinance = financeData.filter(t => t.id !== id);
         setFinanceData(updatedFinance);
         void syncData({ financeData: updatedFinance });
+    };
+
+    const toggleTransactionFilter = (filter) => {
+        setTransactionFilter(current => current === filter ? 'all' : filter);
     };
 
     const changeMonth = (offset) => {
@@ -287,10 +296,20 @@ export default function FinanceView() {
 
                     {/* Recent Transactions List */}
                     <div className="card">
-                        <h2 style={{ marginBottom: '15px' }}>📋 Recent Transactions</h2>
+                        <div className="finance-transactions-header">
+                            <h2>📋 Recent Transactions</h2>
+                            <div className="transaction-filters" role="group" aria-label="Filter transactions">
+                                <button type="button" className={`transaction-filter-button income-filter ${transactionFilter === 'income' ? 'selected' : ''}`} aria-pressed={transactionFilter === 'income'} onClick={() => toggleTransactionFilter('income')}>
+                                    <ArrowDownLeft size={15} aria-hidden="true" /> Income
+                                </button>
+                                <button type="button" className={`transaction-filter-button spending-filter ${transactionFilter === 'expense' ? 'selected' : ''}`} aria-pressed={transactionFilter === 'expense'} onClick={() => toggleTransactionFilter('expense')}>
+                                    <ArrowUpRight size={15} aria-hidden="true" /> Spending
+                                </button>
+                            </div>
+                        </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '250px', overflowY: 'auto' }}>
-                            {monthlyTransactions.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center' }}>No transactions in {monthNames[currentMonth]}.</p>}
-                            {monthlyTransactions.map(t => (
+                            {displayedTransactions.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center' }}>{transactionFilter === 'income' ? 'No income' : transactionFilter === 'expense' ? 'No spending' : 'No transactions'} in {monthNames[currentMonth]}.</p>}
+                            {displayedTransactions.map(t => (
                                 <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border)' }}>
                                     <div>
                                         <strong>{t.desc}</strong>
