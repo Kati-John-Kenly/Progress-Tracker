@@ -30,6 +30,18 @@ import {
 } from 'lucide-react';
 import { AuthContext } from '../context/AuthState';
 import { applyAppTheme, getStoredTheme, subscribeWorkspaceChange } from '../utils/workspaceEvents';
+import {
+    hasSavedDeviceBiometric,
+    registerDeviceBiometric,
+    removeDeviceBiometric,
+    verifyDeviceBiometric
+} from '../utils/deviceBiometrics';
+import {
+    isLocalPasscodeConfigured,
+    removeLocalPasscode,
+    saveLocalPasscode,
+    verifyLocalPasscode
+} from '../utils/localPasscode';
 
 const backupFormat = 'progress-workspace-backup';
 
@@ -62,9 +74,14 @@ export default function SettingsView() {
     const [language, setLanguage] = useState(() => localStorage.getItem('appLanguage') || 'English (US)');
 
     // Security options (Image 2)
-    const [faceId, setFaceId] = useState(() => localStorage.getItem('appFaceId') === 'true');
-    const [passcode, setPasscode] = useState(() => localStorage.getItem('appPasscode') || '');
+    const [faceId, setFaceId] = useState(() => (
+        localStorage.getItem('appFaceId') === 'true' && hasSavedDeviceBiometric()
+    ));
+    const [passcode, setPasscode] = useState(() => isLocalPasscodeConfigured());
     const [txConfirmation, setTxConfirmation] = useState(() => localStorage.getItem('appTxConfirm') !== 'false');
+    const [securityMessage, setSecurityMessage] = useState('');
+    const [securityError, setSecurityError] = useState(false);
+    const [passcodeError, setPasscodeError] = useState('');
 
     // Storage calculation (Image 1)
     const [storageInfo, setStorageInfo] = useState({ percent: 12, usedText: '620KB', quotaText: '5.0MB' });
@@ -72,7 +89,9 @@ export default function SettingsView() {
     // Modals state: null | 'language' | 'passcode' | 'devices' | 'about' | 'privacy' | 'auth'
     const [activeModal, setActiveModal] = useState(null);
     const [shareStatus, setShareStatus] = useState('');
+    const [currentPin, setCurrentPin] = useState('');
     const [tempPin, setTempPin] = useState('');
+    const [confirmPin, setConfirmPin] = useState('');
     const [authMode, setAuthMode] = useState('sign-in');
 
     // Backup state
@@ -127,9 +146,44 @@ export default function SettingsView() {
         localStorage.setItem('appNotifications', val ? 'true' : 'false');
     };
 
-    const toggleFaceId = (val) => {
-        setFaceId(val);
-        localStorage.setItem('appFaceId', val ? 'true' : 'false');
+    const toggleFaceId = async (val) => {
+        setSecurityMessage('');
+        setSecurityError(false);
+        if (!val) {
+            removeDeviceBiometric();
+            localStorage.setItem('appFaceId', 'false');
+            setFaceId(false);
+            setSecurityMessage('Biometric unlock has been turned off.');
+            return;
+        }
+        if (!passcode) {
+            setSecurityError(true);
+            setSecurityMessage('Set a passcode first so you can still unlock if biometric verification is unavailable.');
+            return;
+        }
+        try {
+            await registerDeviceBiometric(user?.email || user?.name || 'Progress user');
+            localStorage.setItem('appFaceId', 'true');
+            setFaceId(true);
+            setSecurityMessage('Biometric unlock is enabled. Your device will use Face ID, fingerprint, or its supported screen lock.');
+        } catch (error) {
+            if (error.name !== 'NotAllowedError') {
+                setSecurityError(true);
+                setSecurityMessage(error.message || 'Could not set up biometric unlock on this device.');
+            }
+        }
+    };
+
+    const handleTestBiometric = async () => {
+        setSecurityMessage('');
+        setSecurityError(false);
+        try {
+            await verifyDeviceBiometric();
+            setSecurityMessage('Biometric verification succeeded.');
+        } catch (error) {
+            setSecurityError(true);
+            setSecurityMessage(error.message || 'Biometric verification failed.');
+        }
     };
 
     const toggleTxConfirmation = (val) => {
@@ -172,20 +226,52 @@ export default function SettingsView() {
         setActiveModal(null);
     };
 
-    const handleSavePasscode = (e) => {
+    const handleSavePasscode = async (e) => {
         e.preventDefault();
-        if (tempPin.length === 4) {
-            setPasscode(tempPin);
-            localStorage.setItem('appPasscode', tempPin);
+        setPasscodeError('');
+        if (passcode) {
+            try {
+                if (!(await verifyLocalPasscode(currentPin))) {
+                    setPasscodeError('The current passcode is incorrect.');
+                    return;
+                }
+            } catch (error) {
+                setPasscodeError(error.message || 'Could not verify the current passcode.');
+                return;
+            }
+        }
+        if (tempPin.length !== 4 || confirmPin !== tempPin) {
+            setPasscodeError('Enter a 4-digit passcode and confirm it correctly.');
+            return;
+        }
+        try {
+            await saveLocalPasscode(tempPin);
+            setPasscode(true);
+            setCurrentPin('');
             setTempPin('');
+            setConfirmPin('');
             setActiveModal(null);
+        } catch (error) {
+            setPasscodeError(error.message || 'Could not save the passcode.');
         }
     };
 
-    const handleRemovePasscode = () => {
-        setPasscode('');
-        localStorage.removeItem('appPasscode');
+    const handleRemovePasscode = async () => {
+        setPasscodeError('');
+        try {
+            if (!(await verifyLocalPasscode(currentPin))) {
+                setPasscodeError('The current passcode is incorrect.');
+                return;
+            }
+        } catch (error) {
+            setPasscodeError(error.message || 'Could not verify the current passcode.');
+            return;
+        }
+        removeLocalPasscode();
+        setPasscode(false);
+        setCurrentPin('');
         setTempPin('');
+        setConfirmPin('');
         setActiveModal(null);
     };
 
