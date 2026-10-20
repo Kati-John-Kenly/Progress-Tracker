@@ -64,6 +64,28 @@ app.get('/api/health', (req, res) => {
     });
 });
 
+app.get('/api/ai/info', (req, res) => {
+    res.json({
+        assistant: 'Aura',
+        role: 'Personal Productivity & Workspace Agent',
+        status: 'online',
+        supportedDomains: ['routines', 'tasks', 'finances', 'streaks', 'theme', 'workspace'],
+        guardrails: 'Strictly restricted to application workspace functions',
+    });
+});
+
+app.post('/api/ai/chat', async (req, res) => {
+    const { message } = req.body || {};
+    if (!message) {
+        return res.status(400).json({ message: 'Message is required.' });
+    }
+    res.json({
+        received: true,
+        message,
+        status: 'ok',
+    });
+});
+
 app.get('/api/data', requireClerkUser, async (req, res) => {
     try {
         const { data: record, error } = await supabaseAdmin

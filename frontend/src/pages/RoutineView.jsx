@@ -1,378 +1,838 @@
-import { useContext, useState, useEffect, useRef } from 'react';
-import { GripVertical } from 'lucide-react';
+import { useContext, useState, useEffect, useRef, useMemo } from 'react';
+import {
+    Droplets,
+    Dumbbell,
+    BookOpen,
+    Heart,
+    Briefcase,
+    Utensils,
+    Smile,
+    Clock,
+    ChevronLeft,
+    ChevronRight,
+    Plus,
+    Check,
+    MoreVertical,
+    Sparkles,
+    Flame,
+    Trash2,
+    Calendar as CalendarIcon,
+    X,
+    Filter,
+    RotateCcw,
+    Zap,
+    Coffee,
+    Lock,
+    AlertTriangle
+} from 'lucide-react';
 import { AuthContext } from '../context/AuthState';
+import {
+    subscribeWorkspaceChange,
+    emitWorkspaceChange,
+    getStoredRoutineTasks,
+    setStoredRoutineTasks,
+    calculateStreakStats
+} from '../utils/workspaceEvents';
+
+// Local date format helper (YYYY-MM-DD) avoiding timezone skew
+export const getLocalDateString = (d = new Date()) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+// Smart Category & Icon Detection
+export const getTaskCategoryMeta = (title = '', customColor) => {
+    const t = title.toLowerCase();
+    if (/water|drink|hydrate|hydration|fluid|glass/i.test(t)) {
+        return { icon: Droplets, color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.15)', label: 'Hydration' };
+    }
+    if (/exercise|workout|gym|run|walk|yoga|cardio|fitness|stretch|training/i.test(t)) {
+        return { icon: Dumbbell, color: '#f97316', bg: 'rgba(249, 115, 22, 0.15)', label: 'Fitness' };
+    }
+    if (/read|book|study|learn|class|course|homework|pages/i.test(t)) {
+        return { icon: BookOpen, color: '#ec4899', bg: 'rgba(236, 72, 153, 0.15)', label: 'Learning' };
+    }
+    if (/brush|floss|meditat|sleep|nap|rest|teeth|shower|skin|routine|health/i.test(t)) {
+        return { icon: Heart, color: '#eab308', bg: 'rgba(234, 179, 8, 0.15)', label: 'Health' };
+    }
+    if (/work|meeting|project|code|client|office|review|email|call|admin|focus/i.test(t)) {
+        return { icon: Briefcase, color: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.15)', label: 'Work' };
+    }
+    if (/eat|food|breakfast|lunch|dinner|snack|cook|meal|coffee|tea|nutrition/i.test(t)) {
+        return { icon: Utensils, color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)', label: 'Nutrition' };
+    }
+    return { icon: Sparkles, color: customColor || '#6366f1', bg: 'rgba(99, 102, 241, 0.15)', label: 'Habit' };
+};
+
+export const getTaskDurationLabel = (start, end) => {
+    if (!start && !end) return null;
+    if (start && end) {
+        const [sh, sm] = start.split(':').map(Number);
+        const [eh, em] = end.split(':').map(Number);
+        const totalMins = (eh * 60 + em) - (sh * 60 + sm);
+        if (totalMins > 0) {
+            const hrs = Math.floor(totalMins / 60);
+            const mins = totalMins % 60;
+            if (hrs > 0 && mins > 0) return `${hrs}h ${mins}m`;
+            if (hrs > 0) return `${hrs}h`;
+            return `${mins}m`;
+        }
+        return `${start} - ${end}`;
+    }
+    return start;
+};
+
+const QUICK_PRESETS = [
+    { title: 'Drink water', start: '08:00', end: '08:30', color: '#38bdf8' },
+    { title: 'Do morning exercise', start: '08:30', end: '09:00', color: '#f97316' },
+    { title: 'Brush & floss', start: '09:00', end: '09:15', color: '#eab308' },
+    { title: 'Read 20 pages', start: '21:00', end: '21:30', color: '#ec4899' },
+    { title: 'Deep Work Session', start: '10:00', end: '12:00', color: '#8b5cf6' },
+];
 
 export default function RoutineView() {
     const { syncData } = useContext(AuthContext);
-    // --- STATE MANAGEMENT ---
-    const [tasks, setTasks] = useState(() => JSON.parse(localStorage.getItem('hybridRoutineTasks')) || []);
-    const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
-    
-    // Calendar View State
-    const [viewDate, setViewDate] = useState(new Date());
-    
-    // Form State
-    const [newTaskName, setNewTaskName] = useState('');
+
+    // Current local today reference
+    const todayStr = useMemo(() => getLocalDateString(), []);
+
+    // Active selected date and tasks state
+    const [tasks, setTasks] = useState(() => getStoredRoutineTasks());
+    const [currentDate, setCurrentDate] = useState(() => getLocalDateString());
+    const [activeFilter, setActiveFilter] = useState('all'); // 'all' | 'morning' | 'afternoon' | 'evening' | 'completed'
+
+    // Date status
+    const isPastDate = currentDate < todayStr;
+    const isFutureDate = currentDate > todayStr;
+    const isToday = currentDate === todayStr;
+
+    // Toast notification state
+    const [toast, setToast] = useState(null);
+    const toastTimeoutRef = useRef(null);
+
+    const showToast = (message, type = 'info') => {
+        if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+        setToast({ message, type });
+        toastTimeoutRef.current = setTimeout(() => {
+            setToast(null);
+        }, 3400);
+    };
+
+    // Add Task Modal State
+    const [showAddModal, setShowAddModal] = useState(false);
+    const [newTaskTitle, setNewTaskTitle] = useState('');
     const [newStartTime, setNewStartTime] = useState('');
     const [newEndTime, setNewEndTime] = useState('');
-    const [selectedColor, setSelectedColor] = useState('#3b82f6'); 
-    const colorInputRef = useRef(null);
-    const draggedTaskIdRef = useRef(null);
-    const dragOverTaskIdRef = useRef(null);
-    const dailyTasksRef = useRef([]);
-    const currentDateRef = useRef(currentDate);
-    const [draggingTaskId, setDraggingTaskId] = useState(null);
+    const [selectedColor, setSelectedColor] = useState('#3b82f6');
+    const [selectedCategory, setSelectedCategory] = useState('Fitness');
 
-    // Save LocalStorage
+    // Save tasks to LocalStorage
     useEffect(() => {
-        localStorage.setItem('hybridRoutineTasks', JSON.stringify(tasks));
+        setStoredRoutineTasks(tasks);
     }, [tasks]);
 
-    // --- DERIVED STATE ---
-    const dailyTasks = tasks.filter(t => t.date === currentDate).sort((a, b) => {
-        if (Number.isInteger(a.order) && Number.isInteger(b.order)) return a.order - b.order;
-        if (Number.isInteger(a.order)) return -1;
-        if (Number.isInteger(b.order)) return 1;
-        if (!a.start) return 1;
-        if (!b.start) return -1;
-        return a.start.localeCompare(b.start);
-    });
-
+    // Listen for workspace updates from AI Assistant or other views
     useEffect(() => {
-        dailyTasksRef.current = dailyTasks;
-        currentDateRef.current = currentDate;
-    }, [dailyTasks, currentDate]);
+        const unsubscribe = subscribeWorkspaceChange(() => {
+            setTasks(getStoredRoutineTasks());
+        });
+        return unsubscribe;
+    }, []);
 
+    // Save helper
     const saveTasks = (updatedTasks) => {
         setTasks(updatedTasks);
+        setStoredRoutineTasks(updatedTasks);
         void syncData({ routineTasks: updatedTasks });
+        emitWorkspaceChange({ type: 'routine' });
     };
 
-    const finishTaskReorder = (targetId) => {
-        const draggedId = draggedTaskIdRef.current;
-        if (draggedId !== null && draggedId !== targetId) {
-            const reordered = [...dailyTasksRef.current];
-            const fromIndex = reordered.findIndex(task => task.id === draggedId);
-            const toIndex = reordered.findIndex(task => task.id === targetId);
-            if (fromIndex !== -1 && toIndex !== -1) {
-                const [movedTask] = reordered.splice(fromIndex, 1);
-                reordered.splice(toIndex, 0, movedTask);
-                const orderById = new Map(reordered.map((task, index) => [task.id, index]));
-                const date = currentDateRef.current;
-                saveTasks(tasks.map(task => task.date === date ? { ...task, order: orderById.get(task.id) } : task));
-            }
+    // Toggle Task completion
+    // RULE: Cannot complete future tasks before actual date; past tasks cannot be changed.
+    const toggleTask = (id) => {
+        const task = tasks.find(t => t.id === id);
+        if (!task) return;
+
+        if (task.date > todayStr) {
+            showToast('Tasks cannot be completed before their actual date.', 'warning');
+            return;
         }
-        draggedTaskIdRef.current = null;
-        dragOverTaskIdRef.current = null;
-        setDraggingTaskId(null);
+        if (task.date < todayStr) {
+            showToast('Past tasks cannot be modified.', 'warning');
+            return;
+        }
+
+        saveTasks(tasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
     };
 
-    // --- HANDLERS ---
-    const handleAddTask = (e) => {
-        e.preventDefault();
-        if (!newTaskName.trim()) return;
+    // Delete Task
+    // RULE: Future & past tasks cannot be modified/deleted once set
+    const deleteTask = (id) => {
+        const task = tasks.find(t => t.id === id);
+        if (!task) return;
 
-        const newTask = {
-            id: Date.now(),
-            date: currentDate,
-            order: dailyTasks.length,
-            title: newTaskName.trim(),
-            start: newStartTime,
-            end: newEndTime,
-            color: selectedColor,
-            completed: false
-        };
+        if (task.date < todayStr) {
+            showToast('Past tasks cannot be deleted or modified.', 'warning');
+            return;
+        }
+        if (task.date > todayStr) {
+            showToast('Scheduled tasks cannot be deleted once set.', 'warning');
+            return;
+        }
 
-        const orderById = new Map(dailyTasks.map((task, index) => [task.id, index]));
-        saveTasks([...tasks.map(task => task.date === currentDate ? { ...task, order: orderById.get(task.id) } : task), newTask]);
-        setNewTaskName('');
-        setNewStartTime('');
-        setNewEndTime('');
+        saveTasks(tasks.filter(t => t.id !== id));
     };
 
-    const toggleTask = (id) => saveTasks(tasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
-    const deleteTask = (id) => saveTasks(tasks.filter(t => t.id !== id));
+    // Clear Day Tasks
+    const clearCurrentDayTasks = () => {
+        if (isPastDate) {
+            showToast('Past dates are read-only and cannot be modified.', 'warning');
+            return;
+        }
+        if (isFutureDate) {
+            showToast('Scheduled future tasks cannot be cleared once set.', 'warning');
+            return;
+        }
+        if (window.confirm('Clear all tasks for today?')) {
+            saveTasks(tasks.filter(t => t.date !== currentDate));
+        }
+    };
 
+    // Load Routine Templates
+    // RULE: Templates can only be loaded for today or future dates (planning)
     const loadTemplate = (type) => {
-        let templateData = [];
-        if (type === 'working') {
-            templateData = [
-                { title: 'Morning Routine & Breakfast', start: '07:00', end: '08:30', color: '#f97316' },
-                { title: 'Deep Work Session', start: '09:00', end: '12:00', color: '#3b82f6' },
-                { title: 'Lunch & Walk', start: '12:00', end: '13:00', color: '#10b981' },
-                { title: 'Meetings & Admin', start: '13:00', end: '17:00', color: '#8b5cf6' }
-            ];
-        } else if (type === 'holiday') {
-            templateData = [
-                { title: 'Sleep In & Relax', start: '09:00', end: '11:00', color: '#ec4899' },
-                { title: 'Hobbies / Gaming', start: '11:00', end: '15:00', color: '#14b8a6' },
-                { title: 'Movie Night', start: '19:00', end: '22:00', color: '#f43f5e' }
-            ];
+        if (isPastDate) {
+            showToast('Past dates cannot be modified. Switch to Today or a future date to plan.', 'warning');
+            return;
         }
 
-        const newTasks = templateData.map((t, index) => ({
-            id: Date.now() + index,
+        const templateData = type === 'working' ? [
+            { title: 'Morning Routine & Breakfast', start: '07:00', end: '08:30', color: '#f97316' },
+            { title: 'Deep Work Session', start: '09:00', end: '12:00', color: '#3b82f6' },
+            { title: 'Lunch & Walk', start: '12:00', end: '13:00', color: '#10b981' },
+            { title: 'Meetings & Review', start: '13:00', end: '17:00', color: '#8b5cf6' },
+            { title: 'Read & Wind Down', start: '21:30', end: '22:30', color: '#ec4899' }
+        ] : [
+            { title: 'Sleep In & Relax', start: '09:00', end: '11:00', color: '#ec4899' },
+            { title: 'Hobbies & Gaming', start: '11:00', end: '15:00', color: '#14b8a6' },
+            { title: 'Outdoor Walk', start: '16:00', end: '17:30', color: '#10b981' },
+            { title: 'Movie Night', start: '19:00', end: '22:00', color: '#f43f5e' }
+        ];
+
+        const dayTasks = tasks.filter(t => t.date === currentDate);
+        const newTasks = templateData.map((t, idx) => ({
+            id: Date.now() + idx,
             date: currentDate,
-            order: dailyTasks.length + index,
+            order: dayTasks.length + idx,
             title: t.title,
             start: t.start,
             end: t.end,
             color: t.color,
             completed: false
         }));
-        const orderById = new Map(dailyTasks.map((task, index) => [task.id, index]));
-        saveTasks([...tasks.map(task => task.date === currentDate ? { ...task, order: orderById.get(task.id) } : task), ...newTasks]);
+
+        saveTasks([...tasks, ...newTasks]);
+        showToast('Template routine loaded!', 'success');
     };
 
-    const resetTemplate = () => {
-        if (window.confirm('Clear today\'s schedule?')) {
-            saveTasks(tasks.filter(t => t.date !== currentDate));
+    // Create New Task
+    // RULE: User can set their task for today or future dates; past dates are read-only
+    const handleCreateTask = (e) => {
+        e.preventDefault();
+        if (!newTaskTitle.trim()) return;
+
+        if (isPastDate) {
+            showToast('Past dates are read-only. Tasks cannot be added to past dates.', 'warning');
+            return;
         }
+
+        const dayTasks = tasks.filter(t => t.date === currentDate);
+        const newTask = {
+            id: Date.now(),
+            date: currentDate,
+            order: dayTasks.length,
+            title: newTaskTitle.trim(),
+            start: newStartTime,
+            end: newEndTime,
+            color: selectedColor,
+            completed: false
+        };
+
+        saveTasks([...tasks, newTask]);
+        setNewTaskTitle('');
+        setNewStartTime('');
+        setNewEndTime('');
+        setShowAddModal(false);
+        showToast(isFutureDate ? 'Task scheduled for future date!' : 'Task added to today\'s routine!', 'success');
     };
 
-    // --- HELPER: FORMAT OPTIONAL TIMES ---
-    const formatTimeDisplay = (start, end) => {
-        if (start && end) return `${start} to ${end}`;
-        if (start) return `Starts at ${start}`;
-        if (end) return `Ends at ${end}`;
-        return null; // Return nothing if no time is provided
+    const handleApplyPreset = (preset) => {
+        setNewTaskTitle(preset.title);
+        setNewStartTime(preset.start);
+        setNewEndTime(preset.end);
+        setSelectedColor(preset.color);
     };
 
-    // --- ANALYTICS CALCULATIONS ---
-    let totalLoggedMinutes = 0;
-    dailyTasks.forEach(t => {
-        if (t.start && t.end) {
-            const startMins = parseInt(t.start.split(':')[0]) * 60 + parseInt(t.start.split(':')[1]);
-            const endMins = parseInt(t.end.split(':')[0]) * 60 + parseInt(t.end.split(':')[1]);
-            if (endMins > startMins) totalLoggedMinutes += (endMins - startMins);
-        } else {
-            totalLoggedMinutes += 60; // Default 1 hour if no time specified
+    // Date navigation helpers
+    const changeDateByDays = (days) => {
+        const [y, m, d] = currentDate.split('-').map(Number);
+        const dt = new Date(y, m - 1, d);
+        dt.setDate(dt.getDate() + days);
+        setCurrentDate(getLocalDateString(dt));
+    };
+
+    // Generate Date Carousel Strip (Image 2 & 3 style)
+    const dateStripDays = useMemo(() => {
+        const [y, m, d] = currentDate.split('-').map(Number);
+        const center = new Date(y, m - 1, d);
+        const list = [];
+        const weekdayShort = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+
+        for (let i = -4; i <= 4; i++) {
+            const dt = new Date(center);
+            dt.setDate(dt.getDate() + i);
+            const dateStr = getLocalDateString(dt);
+
+            // Check completion for that day
+            const dayT = tasks.filter(t => t.date === dateStr);
+            const isCompleted = dayT.length > 0 && dayT.every(t => t.completed);
+            const hasTasks = dayT.length > 0;
+
+            list.push({
+                dateStr,
+                dayName: weekdayShort[dt.getDay()],
+                dayNum: dt.getDate(),
+                isToday: dateStr === todayStr,
+                isSelected: dateStr === currentDate,
+                isPast: dateStr < todayStr,
+                isFuture: dateStr > todayStr,
+                isCompleted,
+                hasTasks
+            });
         }
-    });
+        return list;
+    }, [currentDate, tasks, todayStr]);
 
-    const loggedHours = (totalLoggedMinutes / 60).toFixed(1);
+    // Tasks for the selected date
+    const currentDayTasks = useMemo(() => {
+        return tasks
+            .filter(t => t.date === currentDate)
+            .sort((a, b) => {
+                if (Number.isInteger(a.order) && Number.isInteger(b.order)) return a.order - b.order;
+                if (!a.start) return 1;
+                if (!b.start) return -1;
+                return a.start.localeCompare(b.start);
+            });
+    }, [tasks, currentDate]);
 
-    // --- CALENDAR RENDERER ---
-    const currentMonth = viewDate.getMonth();
-    const currentYear = viewDate.getFullYear();
-    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-    const changeMonth = (offset) => {
-        const newDate = new Date(viewDate);
-        newDate.setMonth(newDate.getMonth() + offset);
-        setViewDate(newDate);
-    };
-
-    const renderCalendar = () => {
-        const firstDay = new Date(currentYear, currentMonth, 1).getDay();
-        const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-        
-        const days = [];
-        // Empty slots for alignment
-        for (let i = 0; i < firstDay; i++) {
-            days.push(<div key={`empty-${i}`} className="cal-day" style={{ background: 'transparent', border: 'none' }}></div>);
+    // Filter tasks based on Time of Day (Image 2 style)
+    const filteredTasks = useMemo(() => {
+        if (activeFilter === 'all') return currentDayTasks;
+        if (activeFilter === 'completed') return currentDayTasks.filter(t => t.completed);
+        if (activeFilter === 'morning') {
+            return currentDayTasks.filter(t => {
+                if (!t.start) return true;
+                const hour = parseInt(t.start.split(':')[0], 10);
+                return hour < 12;
+            });
         }
-        
-        // Actual days
-        for (let i = 1; i <= daysInMonth; i++) {
-            const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-            
-            // Calculate consistency for this day
-            const dayTasks = tasks.filter(t => t.date === dateStr);
-            const totalTasks = dayTasks.length;
-            const completedTasks = dayTasks.filter(t => t.completed).length;
-            
-            let bgStyle = 'var(--bg-card)';
-            let borderStyle = '1px solid var(--border)';
-            
-            if (totalTasks > 0) {
-                if (completedTasks === totalTasks) {
-                    bgStyle = 'rgba(16, 185, 129, 0.2)'; // All tasks done: Green
-                    borderStyle = '1px solid var(--success)';
-                } else if (completedTasks > 0) {
-                    bgStyle = 'rgba(249, 115, 22, 0.15)'; // Some tasks done: Orange
-                    borderStyle = '1px solid #f97316';
-                } else {
-                    bgStyle = 'rgba(255,255,255,0.05)'; // Tasks scheduled but 0 done
-                }
-            }
-
-            // Highlight the currently selected date
-            if (dateStr === currentDate) {
-                borderStyle = '2px solid var(--primary)';
-            }
-
-            days.push(
-                <div 
-                    key={i} 
-                    onClick={() => setCurrentDate(dateStr)}
-                    className="cal-day" 
-                    style={{ 
-                        flexDirection: 'column', 
-                        padding: '8px 4px', 
-                        background: bgStyle, 
-                        border: borderStyle,
-                        borderRadius: '8px',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s'
-                    }}
-                >
-                    <span style={{ fontWeight: 'bold', color: 'var(--text-main)' }}>{i}</span>
-                </div>
-            );
+        if (activeFilter === 'afternoon') {
+            return currentDayTasks.filter(t => {
+                if (!t.start) return false;
+                const hour = parseInt(t.start.split(':')[0], 10);
+                return hour >= 12 && hour < 17;
+            });
         }
-        return days;
-    };
+        if (activeFilter === 'evening') {
+            return currentDayTasks.filter(t => {
+                if (!t.start) return false;
+                const hour = parseInt(t.start.split(':')[0], 10);
+                return hour >= 17;
+            });
+        }
+        return currentDayTasks;
+    }, [currentDayTasks, activeFilter]);
+
+    // Progress stats
+    const totalCount = currentDayTasks.length;
+    const completedCount = currentDayTasks.filter(t => t.completed).length;
+    const progressPercent = totalCount === 0 ? 0 : Math.round((completedCount / totalCount) * 100);
+    const streakInfo = useMemo(() => calculateStreakStats(tasks), [tasks]);
+
+    // Format current date label e.g. "Today", "Yesterday", "Tomorrow" or "Thu, 22 Oct"
+    const displayHeaderDate = useMemo(() => {
+        if (currentDate === todayStr) return 'Today';
+        const [y, m, d] = currentDate.split('-').map(Number);
+        const dt = new Date(y, m - 1, d);
+        return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    }, [currentDate, todayStr]);
 
     return (
-        <div className="view-section active">
-            <div className="dashboard" style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
-                
-                {/* LEFT COLUMN: Timeblocks & Tasks */}
-                <div className="column" style={{ flex: 2, minWidth: '320px' }}>
-                    
-                    {/* Header: Date & Controls (FIXED ALIGNMENT) */}
-                    <div className="card" style={{ padding: '20px', marginBottom: '24px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                            <h2 style={{ margin: 0, fontSize: '1.4rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                <span>📅</span> Schedule
-                            </h2>
-                            {dailyTasks.length > 0 && (
-                                <button onClick={resetTemplate} style={{ background: 'var(--bg-dark)', color: 'var(--text-main)', border: '1px solid var(--border)', padding: '8px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '0.85rem' }}>
-                                    ↺ Clear Day
-                                </button>
-                            )}
-                        </div>
-                        <input 
-                            type="date" 
-                            value={currentDate}
-                            onChange={(e) => setCurrentDate(e.target.value)}
-                            className="sleek-input"
-                            style={{ background: 'rgba(255,255,255,0.05)', marginBottom: 0, padding: '10px 14px', width: '100%', maxWidth: '100%' }}
-                        />
-                    </div>
+        <div className="routine-page-container">
+            {/* FLOATING FEEDBACK TOAST */}
+            {toast && (
+                <div className={`routine-toast-banner ${toast.type}`}>
+                    {toast.type === 'warning' && <AlertTriangle size={16} className="routine-toast-icon" />}
+                    {toast.type === 'success' && <Check size={16} className="routine-toast-icon" />}
+                    {toast.type === 'info' && <Sparkles size={16} className="routine-toast-icon" />}
+                    <span>{toast.message}</span>
+                    <button type="button" onClick={() => setToast(null)} className="routine-toast-close" aria-label="Dismiss">
+                        <X size={14} />
+                    </button>
+                </div>
+            )}
 
-                    {/* Task List or Templates */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '30px' }}>
-                        {dailyTasks.length === 0 ? (
-                            <div style={{ background: 'rgba(255,255,255,0.02)', padding: '40px 20px', borderRadius: '16px', textAlign: 'center', border: '1px dashed var(--border)' }}>
-                                <p style={{ color: 'var(--text-muted)', marginBottom: '20px', fontSize: '1.05rem' }}>Your day is completely open. Load a routine to get started:</p>
-                                <div style={{ display: 'flex', gap: '15px', justifyContent: 'center', flexWrap: 'wrap' }}>
-                                    <button onClick={() => loadTemplate('working')} className="primary-btn-large" style={{ width: 'auto', padding: '12px 24px', background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: '1px solid #3b82f6' }}>💼 Work Day</button>
-                                    <button onClick={() => loadTemplate('holiday')} className="primary-btn-large" style={{ width: 'auto', padding: '12px 24px', background: 'rgba(236, 72, 153, 0.1)', color: '#ec4899', border: '1px solid #ec4899' }}>🏖️ Holiday</button>
-                                </div>
+            {/* TOP BAR: DATE NAVIGATION & ACTIONS */}
+            <div className="routine-top-header">
+                <div className="routine-date-nav-wrap">
+                    <button
+                        type="button"
+                        onClick={() => changeDateByDays(-1)}
+                        className="routine-arrow-btn"
+                        title="Previous day"
+                        aria-label="Previous day"
+                    >
+                        <ChevronLeft size={20} />
+                    </button>
+
+                    <h2 className="routine-date-title">{displayHeaderDate}</h2>
+
+                    <button
+                        type="button"
+                        onClick={() => changeDateByDays(1)}
+                        className="routine-arrow-btn"
+                        title="Next day"
+                        aria-label="Next day"
+                    >
+                        <ChevronRight size={20} />
+                    </button>
+                </div>
+
+                <div className="routine-header-right-actions">
+                    {isPastDate && (
+                        <span className="routine-status-pill past" title="Historical records are read-only">
+                            <Lock size={12} />
+                            <span>Past (Locked)</span>
+                        </span>
+                    )}
+                    {isFutureDate && (
+                        <span className="routine-status-pill future" title="Scheduled tasks are locked until this date arrives">
+                            <CalendarIcon size={12} />
+                            <span>Scheduled</span>
+                        </span>
+                    )}
+
+                    <button
+                        type="button"
+                        onClick={() => setCurrentDate(todayStr)}
+                        className={`routine-today-pill-btn ${isToday ? 'active' : ''}`}
+                    >
+                        Today
+                    </button>
+
+                    {!isPastDate && !isFutureDate && currentDayTasks.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={clearCurrentDayTasks}
+                            className="routine-clear-day-btn"
+                            title="Clear this day's tasks"
+                        >
+                            <Trash2 size={16} />
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {/* HORIZONTAL DATE CAROUSEL STRIP (IMAGE 2 & 3 STYLE) */}
+            <div className="routine-date-strip-scroll">
+                <div className="routine-date-strip">
+                    {dateStripDays.map((day) => (
+                        <button
+                            key={day.dateStr}
+                            type="button"
+                            onClick={() => setCurrentDate(day.dateStr)}
+                            className={`routine-day-card ${day.isSelected ? 'selected' : ''} ${day.isToday ? 'today' : ''} ${day.isPast ? 'past-day' : ''} ${day.isFuture ? 'future-day' : ''}`}
+                        >
+                            <span className="routine-day-name">{day.dayName}</span>
+                            <span className="routine-day-num">{day.dayNum}</span>
+                            {day.isCompleted && (
+                                <span className="routine-day-indicator completed" title="100% complete">
+                                    <Flame size={11} color="#f97316" />
+                                </span>
+                            )}
+                            {!day.isCompleted && day.hasTasks && (
+                                <span className="routine-day-indicator partial" />
+                            )}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            {/* PROGRESS & STREAK BANNER (IMAGE 3 INSPIRED) */}
+            <div className="routine-progress-banner">
+                <div className="routine-progress-left">
+                    <div className="routine-progress-circle-wrap">
+                        <svg className="routine-progress-svg" viewBox="0 0 44 44">
+                            <circle
+                                className="routine-progress-bg-circle"
+                                cx="22"
+                                cy="22"
+                                r="18"
+                            />
+                            <circle
+                                className="routine-progress-bar-circle"
+                                cx="22"
+                                cy="22"
+                                r="18"
+                                strokeDasharray={113}
+                                strokeDashoffset={113 - (113 * progressPercent) / 100}
+                            />
+                        </svg>
+                        <div className="routine-progress-inner-text">
+                            <span className="routine-progress-number">{progressPercent}%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="routine-progress-center">
+                    <h3>{totalCount === 0 ? "Plan your day" : `${completedCount} of ${totalCount} completed`}</h3>
+                    <p>
+                        {totalCount === 0
+                            ? isFutureDate
+                                ? "Plan upcoming tasks in advance."
+                                : isPastDate
+                                ? "No tasks were recorded on this day."
+                                : "No tasks scheduled for today yet."
+                            : isFutureDate
+                            ? "Planned tasks will unlock for completion on this date."
+                            : isPastDate
+                            ? "Historical record preserved."
+                            : progressPercent === 100
+                            ? "Incredible job! All tasks completed today! 🔥"
+                            : "Keep going to build your daily streak."}
+                    </p>
+                </div>
+
+                <div className="routine-progress-streak-tag">
+                    <Flame size={14} color="#f97316" />
+                    <span>{streakInfo.currentStreak}d streak</span>
+                </div>
+            </div>
+
+            {/* TIME-OF-DAY FILTER CHIPS (IMAGE 2 STYLE) */}
+            <div className="routine-time-filters">
+                <button
+                    type="button"
+                    onClick={() => setActiveFilter('evening')}
+                    className={`routine-filter-chip ${activeFilter === 'evening' ? 'active' : ''}`}
+                >
+                    Evening
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setActiveFilter('all')}
+                    className={`routine-filter-chip ${activeFilter === 'all' ? 'active' : ''}`}
+                >
+                    All Day
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setActiveFilter('morning')}
+                    className={`routine-filter-chip ${activeFilter === 'morning' ? 'active' : ''}`}
+                >
+                    Morning
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setActiveFilter('afternoon')}
+                    className={`routine-filter-chip ${activeFilter === 'afternoon' ? 'active' : ''}`}
+                >
+                    Afternoon
+                </button>
+                {completedCount > 0 && (
+                    <button
+                        type="button"
+                        onClick={() => setActiveFilter('completed')}
+                        className={`routine-filter-chip ${activeFilter === 'completed' ? 'active' : ''}`}
+                    >
+                        Done ({completedCount})
+                    </button>
+                )}
+            </div>
+
+            {/* REQUIREMENT 2: ADD A NEW TASK SHIFTED TO TOP OF TASKS */}
+            <div className="routine-add-bar-wrap routine-add-bar-top">
+                <button
+                    type="button"
+                    onClick={() => {
+                        if (isPastDate) {
+                            showToast('Past dates are read-only. Tasks cannot be added to past dates.', 'warning');
+                            return;
+                        }
+                        setShowAddModal(true);
+                    }}
+                    className={`routine-add-main-btn ${isPastDate ? 'disabled-past' : ''}`}
+                    title={isPastDate ? "Past dates cannot be modified" : "Add a new routine task"}
+                >
+                    {isPastDate ? <Lock size={18} /> : <Plus size={18} />}
+                    <span>
+                        {isPastDate
+                            ? 'Past Date (History Locked)'
+                            : isFutureDate
+                            ? 'Schedule task for this day'
+                            : 'Add a new task'}
+                    </span>
+                </button>
+            </div>
+
+            {/* TASK CARDS LIST (IMAGE 2 & 3 STYLE) */}
+            <div className="routine-tasks-list">
+                {filteredTasks.length === 0 ? (
+                    <div className="routine-empty-box">
+                        <div className="routine-empty-icon">
+                            <Sparkles size={32} />
+                        </div>
+                        <h4>{isPastDate ? "No records on this date" : "No tasks in this view"}</h4>
+                        <p>
+                            {isPastDate
+                                ? "This day has passed without recorded tasks."
+                                : "Get started by adding custom routines or loading a preset template below:"}
+                        </p>
+                        {!isPastDate && (
+                            <div className="routine-template-btns">
+                                <button
+                                    type="button"
+                                    onClick={() => loadTemplate('working')}
+                                    className="routine-template-btn work"
+                                >
+                                    <Briefcase size={16} />
+                                    <span>Work Routine</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => loadTemplate('holiday')}
+                                    className="routine-template-btn holiday"
+                                >
+                                    <Smile size={16} />
+                                    <span>Holiday Routine</span>
+                                </button>
                             </div>
-                        ) : (
-                            dailyTasks.map(task => {
-                                const timeDisplay = formatTimeDisplay(task.start, task.end);
-                                return (
-                                    <div key={task.id} data-task-id={task.id} onDragOver={(event) => { event.preventDefault(); dragOverTaskIdRef.current = task.id; }} onDrop={(event) => { event.preventDefault(); finishTaskReorder(task.id); }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderLeft: `6px solid ${task.color}`, borderRadius: '12px', boxShadow: '0 4px 6px rgba(0,0,0,0.2)', opacity: draggingTaskId === task.id ? 0.65 : 1, outline: draggingTaskId === task.id ? '2px solid var(--primary)' : 'none' }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                                            <button type="button" draggable="true" className="task-reorder-handle" aria-label={`Reorder ${task.title}`} title="Long press and drag to reorder" onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', String(task.id)); draggedTaskIdRef.current = task.id; setDraggingTaskId(task.id); }} onDragEnd={() => { draggedTaskIdRef.current = null; dragOverTaskIdRef.current = null; setDraggingTaskId(null); }}>
-                                                <GripVertical size={18} aria-hidden="true" />
-                                            </button>
-                                            <div onClick={() => toggleTask(task.id)} style={{ width: '24px', height: '24px', borderRadius: '50%', border: `2px solid ${task.completed ? 'var(--success)' : task.color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', background: task.completed ? 'var(--success)' : 'transparent', cursor: 'pointer', flexShrink: 0 }}>
-                                                {task.completed && <span style={{ color: 'var(--bg-dark)', fontSize: '0.8rem', fontWeight: 'bold' }}>✓</span>}
-                                            </div>
-                                            <div>
-                                                <strong style={{ display: 'block', fontSize: '1.1rem', color: task.completed ? 'var(--text-muted)' : 'var(--text-main)', textDecoration: task.completed ? 'line-through' : 'none', marginBottom: timeDisplay ? '4px' : '0' }}>
-                                                    {task.title}
-                                                </strong>
-                                                {timeDisplay && (
-                                                    <small style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>{timeDisplay}</small>
-                                                )}
-                                            </div>
-                                        </div>
-                                        <button onClick={() => deleteTask(task.id)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.4rem', padding: '5px' }}>✕</button>
-                                    </div>
-                                );
-                            })
                         )}
                     </div>
+                ) : (
+                    filteredTasks.map((task) => {
+                        const meta = getTaskCategoryMeta(task.title, task.color);
+                        const IconComponent = meta.icon;
+                        const durationLabel = getTaskDurationLabel(task.start, task.end);
 
-                    {/* Add Task Form (Time is now perfectly optional) */}
-                    <form onSubmit={handleAddTask} className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                        <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text-main)', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>➕ Add Custom Block</h3>
-                        
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            <label style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: '500' }}>Task Name & Color</label>
-                            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                                <div style={{ position: 'relative', width: '50px', height: '50px', flexShrink: 0 }}>
-                                    <button type="button" aria-label="Choose task color" title="Choose task color" onClick={() => colorInputRef.current?.showPicker ? colorInputRef.current.showPicker() : colorInputRef.current?.click()} style={{ width: '100%', height: '100%', borderRadius: '12px', border: '2px solid var(--border)', cursor: 'pointer', background: selectedColor }} />
-                                    <input ref={colorInputRef} type="color" aria-label="Task color" value={selectedColor} onChange={(e) => setSelectedColor(e.target.value)} style={{ opacity: 0, width: '1px', height: '1px', position: 'absolute', top: '50%', left: '50%', pointerEvents: 'none' }} />
+                        return (
+                            <div
+                                key={task.id}
+                                className={`routine-task-card ${task.completed ? 'completed' : ''} ${isFutureDate ? 'future-task-card' : ''} ${isPastDate ? 'past-task-card' : ''}`}
+                            >
+                                {/* LEFT ICON IN SOFT CIRCLE */}
+                                <div
+                                    className="routine-task-icon-wrap"
+                                    style={{
+                                        background: meta.bg,
+                                        color: meta.color,
+                                    }}
+                                >
+                                    <IconComponent size={20} />
                                 </div>
-                                <input type="text" value={newTaskName} onChange={(e) => setNewTaskName(e.target.value)} placeholder="What are you working on?" required className="sleek-input" style={{ flexGrow: 1, marginBottom: 0, padding: '15px', fontSize: '1.05rem', borderRadius: '12px' }} />
+
+                                {/* CENTER DETAILS */}
+                                <div className="routine-task-details">
+                                    <h4 className="routine-task-title">{task.title}</h4>
+                                    <div className="routine-task-meta-row">
+                                        <span className="routine-task-tag">★ {meta.label}</span>
+                                        {task.start && (
+                                            <span className="routine-task-time-text">
+                                                {task.start}{task.end ? ` - ${task.end}` : ''}
+                                            </span>
+                                        )}
+                                        {isFutureDate && (
+                                            <span className="routine-task-lock-tag" title="Cannot complete before actual date">
+                                                <Lock size={10} /> Locked until {displayHeaderDate}
+                                            </span>
+                                        )}
+                                        {isPastDate && (
+                                            <span className="routine-task-lock-tag past" title="Past record locked">
+                                                <Lock size={10} /> Historical
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* RIGHT: DURATION BADGE & CHECK CIRCLE */}
+                                <div className="routine-task-right">
+                                    {durationLabel && (
+                                        <div className="routine-task-duration-badge">
+                                            <Clock size={12} />
+                                            <span>{durationLabel}</span>
+                                        </div>
+                                    )}
+
+                                    {/* REQUIREMENT 3: FUTURE/PAST COMPLETION RESTRICTION */}
+                                    <button
+                                        type="button"
+                                        onClick={() => toggleTask(task.id)}
+                                        className={`routine-task-check-btn ${task.completed ? 'checked' : ''} ${isFutureDate ? 'future-locked' : ''} ${isPastDate ? 'past-locked' : ''}`}
+                                        title={
+                                            isFutureDate
+                                                ? "Cannot complete before actual date"
+                                                : isPastDate
+                                                ? "Past records cannot be modified"
+                                                : task.completed
+                                                ? "Mark incomplete"
+                                                : "Mark complete"
+                                        }
+                                        aria-label="Toggle task completion"
+                                    >
+                                        {task.completed ? (
+                                            <Check size={14} strokeWidth={3} />
+                                        ) : isFutureDate ? (
+                                            <Lock size={12} className="routine-lock-center" />
+                                        ) : isPastDate ? (
+                                            <Lock size={12} className="routine-lock-center" />
+                                        ) : null}
+                                    </button>
+
+                                    {/* REQUIREMENT 3: FUTURE/PAST MODIFICATION RESTRICTION */}
+                                    {!isPastDate && !isFutureDate ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => deleteTask(task.id)}
+                                            className="routine-task-delete-btn"
+                                            title="Delete task"
+                                            aria-label="Delete task"
+                                        >
+                                            <Trash2 size={15} />
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onClick={() => deleteTask(task.id)}
+                                            className="routine-task-delete-btn locked"
+                                            title={isPastDate ? "Past tasks cannot be deleted" : "Scheduled tasks cannot be deleted once set"}
+                                            aria-label="Locked action"
+                                        >
+                                            <Lock size={13} style={{ opacity: 0.35 }} />
+                                        </button>
+                                    )}
+                                </div>
                             </div>
-                        </div>
-
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '16px' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                <label style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: '500' }}>Start Time <span style={{ fontSize: '0.75rem' }}>(Optional)</span></label>
-                                <input type="time" value={newStartTime} onChange={(e) => setNewStartTime(e.target.value)} className="sleek-input" style={{ marginBottom: 0, padding: '14px', borderRadius: '12px' }} />
-                            </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                <label style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: '500' }}>End Time <span style={{ fontSize: '0.75rem' }}>(Optional)</span></label>
-                                <input type="time" value={newEndTime} onChange={(e) => setNewEndTime(e.target.value)} className="sleek-input" style={{ marginBottom: 0, padding: '14px', borderRadius: '12px' }} />
-                            </div>
-                        </div>
-
-                        <button type="submit" className="primary-btn-large" style={{ width: '100%', padding: '16px', fontSize: '1.1rem', borderRadius: '12px', marginTop: '10px' }}>
-                            + Schedule Task
-                        </button>
-                    </form>
-                </div>
-
-                {/* RIGHT COLUMN: Calendar & Analytics */}
-                <div className="column" style={{ flex: 1, minWidth: '300px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-                    
-                    {/* NEW: Consistency Calendar */}
-                    <div className="card" style={{ padding: '20px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                            <button onClick={() => changeMonth(-1)} style={{ background: 'transparent', color: 'var(--text-main)', border: 'none', cursor: 'pointer' }}>&lt; Prev</button>
-                            <h3 style={{ margin: 0, color: 'var(--primary)', fontSize: '1.1rem' }}>{monthNames[currentMonth]} {currentYear}</h3>
-                            <button onClick={() => changeMonth(1)} style={{ background: 'transparent', color: 'var(--text-main)', border: 'none', cursor: 'pointer' }}>Next &gt;</button>
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '10px' }}>
-                            <span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span>
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px' }}>
-                            {renderCalendar()}
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '15px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><div style={{ width: '10px', height: '10px', background: 'rgba(16, 185, 129, 0.2)', borderRadius: '2px', border: '1px solid var(--success)' }}></div> Perfect</span>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><div style={{ width: '10px', height: '10px', background: 'rgba(249, 115, 22, 0.15)', borderRadius: '2px', border: '1px solid #f97316' }}></div> Partial</span>
-                        </div>
-                    </div>
-
-                    {/* Daily Capacity Analytics */}
-                    <div className="card" style={{ padding: '24px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-                            <h3 style={{ margin: 0, fontSize: '1.2rem' }}>⏱️ Daily Capacity</h3>
-                        </div>
-                        
-                        <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-                            <span style={{ fontSize: '2.2rem', fontWeight: 'bold', color: 'var(--text-main)', lineHeight: 1 }}>{loggedHours} <span style={{ fontSize: '1.1rem', color: 'var(--text-muted)', fontWeight: 'normal' }}>hrs</span></span>
-                            <span style={{ color: 'var(--text-muted)', fontSize: '0.95rem', paddingBottom: '4px' }}>/ 24 hrs scheduled</span>
-                        </div>
-                        
-                        <div style={{ width: '100%', height: '16px', background: 'var(--bg-dark)', borderRadius: '20px', overflow: 'hidden', display: 'flex', border: '1px solid var(--border)' }}>
-                            {dailyTasks.map(task => {
-                                if (!task.start || !task.end) return null;
-                                const startMins = parseInt(task.start.split(':')[0]) * 60 + parseInt(task.start.split(':')[1]);
-                                const endMins = parseInt(task.end.split(':')[0]) * 60 + parseInt(task.end.split(':')[1]);
-                                const duration = endMins - startMins;
-                                if (duration <= 0) return null;
-                                
-                                const widthPct = (duration / (24 * 60)) * 100;
-                                return (
-                                    <div key={task.id} title={`${task.title} (${duration}m)`} style={{ width: `${widthPct}%`, height: '100%', background: task.color, borderRight: '1px solid rgba(0,0,0,0.2)' }}></div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                </div>
-
+                        );
+                    })
+                )}
             </div>
+
+            {/* ADD TASK MODAL / SHEET (IMAGE 2 & 3 INSPIRED) */}
+            {showAddModal && (
+                <div className="routine-modal-overlay" onClick={() => setShowAddModal(false)}>
+                    <div
+                        className="routine-modal-card"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="routine-modal-header">
+                            <h3>{isFutureDate ? `Schedule for ${displayHeaderDate}` : 'Add Routine Task'}</h3>
+                            <button
+                                type="button"
+                                onClick={() => setShowAddModal(false)}
+                                className="routine-modal-close"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        {/* QUICK PRESETS CHIPS */}
+                        <div className="routine-presets-wrap">
+                            <span className="routine-presets-label">Quick Ideas:</span>
+                            <div className="routine-presets-row">
+                                {QUICK_PRESETS.map((preset, idx) => (
+                                    <button
+                                        key={idx}
+                                        type="button"
+                                        onClick={() => handleApplyPreset(preset)}
+                                        className="routine-preset-chip"
+                                    >
+                                        {preset.title}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <form onSubmit={handleCreateTask} className="routine-add-form">
+                            <div className="routine-form-field">
+                                <label>Task Name</label>
+                                <input
+                                    type="text"
+                                    value={newTaskTitle}
+                                    onChange={(e) => setNewTaskTitle(e.target.value)}
+                                    placeholder="e.g. Morning Meditation, Study React"
+                                    required
+                                    autoFocus
+                                    className="routine-input-text"
+                                />
+                            </div>
+
+                            <div className="routine-form-row">
+                                <div className="routine-form-field">
+                                    <label>Start Time</label>
+                                    <input
+                                        type="time"
+                                        value={newStartTime}
+                                        onChange={(e) => setNewStartTime(e.target.value)}
+                                        className="routine-input-time"
+                                    />
+                                </div>
+                                <div className="routine-form-field">
+                                    <label>End Time</label>
+                                    <input
+                                        type="time"
+                                        value={newEndTime}
+                                        onChange={(e) => setNewEndTime(e.target.value)}
+                                        className="routine-input-time"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="routine-form-field">
+                                <label>Category Theme Color</label>
+                                <div className="routine-color-picker">
+                                    {['#38bdf8', '#f97316', '#ec4899', '#eab308', '#8b5cf6', '#10b981', '#6366f1'].map((c) => (
+                                        <button
+                                            key={c}
+                                            type="button"
+                                            className={`routine-color-dot ${selectedColor === c ? 'selected' : ''}`}
+                                            style={{ backgroundColor: c }}
+                                            onClick={() => setSelectedColor(c)}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="routine-modal-actions">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAddModal(false)}
+                                    className="routine-btn-cancel"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="routine-btn-submit"
+                                >
+                                    {isFutureDate ? 'Schedule Task' : 'Add to Routine'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

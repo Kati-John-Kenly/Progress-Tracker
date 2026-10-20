@@ -4,8 +4,9 @@ import { BrowserRouter } from 'react-router-dom'
 import { ClerkProvider } from '@clerk/react'
 import App from './App.jsx'
 import './index.css'
+import { applyAppTheme, getStoredTheme } from './utils/workspaceEvents'
 
-document.body.classList.toggle('light-theme', localStorage.getItem('appTheme') === 'light')
+applyAppTheme(getStoredTheme())
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
 ReactDOM.createRoot(document.getElementById('root')).render(
