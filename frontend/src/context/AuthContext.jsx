@@ -1,20 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth, useClerk, useUser } from '@clerk/react';
+import { createClient } from '@supabase/supabase-js';
 import { AuthContext } from './AuthState';
+import { applyAppTheme } from '../utils/workspaceEvents';
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const hasSupabaseConfig = Boolean(supabaseUrl && supabasePublishableKey);
+const hasAppConfig = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY) && hasSupabaseConfig;
 
 const defaultContext = {
     user: null,
     loading: false,
-    configured: Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY),
+    configured: hasAppConfig,
     syncError: '',
     syncData: async () => {},
     logout: async () => {},
 };
 
-const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-const hasClerkKey = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 const localOwnerKey = 'clerkWorkspaceOwnerId';
-const localDataKeys = ['hybridRoutineTasks', 'financeData', 'financeCategories', 'appTheme'];
+const localDataKeys = ['hybridRoutineTasks', 'financeData', 'financeCategories'];
 const offlineBackupKey = (userId) => `clerkOfflineBackup:${userId}`;
 
 const readLocalData = () => ({
@@ -28,10 +33,8 @@ const writeLocalData = (data) => {
     localStorage.setItem('hybridRoutineTasks', JSON.stringify(data.routineTasks || []));
     localStorage.setItem('financeData', JSON.stringify(data.financeData || []));
     localStorage.setItem('financeCategories', JSON.stringify(data.financeCategories || []));
-    if (data.appTheme === 'dark' || data.appTheme === 'light') {
-        localStorage.setItem('appTheme', data.appTheme);
-        document.body.classList.toggle('light-theme', data.appTheme === 'light');
-    }
+    const activeTheme = localStorage.getItem('appTheme') || data.appTheme || 'dark';
+    applyAppTheme(activeTheme);
 };
 
 const mergeById = (localItems, remoteItems) => {
@@ -67,6 +70,9 @@ function ClerkSessionBridge({ children }) {
     const [hydratedUserId, setHydratedUserId] = useState(null);
     const [syncError, setSyncError] = useState('');
     const syncQueueRef = useRef(Promise.resolve());
+    const supabase = useMemo(() => createClient(supabaseUrl, supabasePublishableKey, {
+        accessToken: async () => getToken(),
+    }), [getToken]);
 
     useEffect(() => {
         if (!isLoaded || !isSignedIn || !userId) return;
@@ -81,12 +87,12 @@ function ClerkSessionBridge({ children }) {
         }
 
         const hydrateUserData = async () => {
-            const token = await getToken();
-            if (!token) throw new Error('Could not verify your Clerk session.');
-            const headers = { Authorization: `Bearer ${token}` };
-            const response = await fetch(`${apiUrl}/api/data`, { headers });
-            if (!response.ok) throw new Error('Could not load your cloud data. Check the API and Supabase configuration.');
-            const result = await response.json();
+            const { data: record, error: loadError } = await supabase
+                .from('user_workspace_data')
+                .select('data')
+                .eq('clerk_user_id', userId)
+                .maybeSingle();
+            if (loadError) throw loadError;
             const currentOwnerId = localStorage.getItem(localOwnerKey);
             const canReuseLocalData = currentOwnerId === userId || (!currentOwnerId && legacyAccountMatches);
             const browserData = canReuseLocalData ? readLocalData() : {
@@ -102,18 +108,16 @@ function ClerkSessionBridge({ children }) {
                 financeCategories: [...new Set([...browserData.financeCategories, ...(offlineData?.financeCategories || [])])],
                 appTheme: offlineData?.appTheme || browserData.appTheme,
             };
-            const data = result.data ? {
-                ...result.data,
-                routineTasks: mergeById(localData.routineTasks, result.data.routineTasks),
-                financeData: mergeById(localData.financeData, result.data.financeData),
-                financeCategories: [...new Set([...(result.data.financeCategories || []), ...localData.financeCategories])],
+            const data = record?.data ? {
+                ...record.data,
+                routineTasks: mergeById(localData.routineTasks, record.data.routineTasks),
+                financeData: mergeById(localData.financeData, record.data.financeData),
+                financeCategories: [...new Set([...(record.data.financeCategories || []), ...localData.financeCategories])],
             } : localData;
-            const saveResponse = await fetch(`${apiUrl}/api/data`, {
-                method: 'PUT',
-                headers: { ...headers, 'Content-Type': 'application/json' },
-                body: JSON.stringify(data),
-            });
-            if (!saveResponse.ok) throw new Error('Your workspace data could not be initialized in Supabase.');
+            const { error: saveError } = await supabase
+                .from('user_workspace_data')
+                .upsert({ clerk_user_id: userId, data, updated_at: new Date().toISOString() });
+            if (saveError) throw saveError;
 
             if (active) {
                 writeLocalData(data);
@@ -140,20 +144,17 @@ function ClerkSessionBridge({ children }) {
             });
 
         return () => { active = false; };
-    }, [clerkUser, getToken, isLoaded, isSignedIn, userId]);
+    }, [clerkUser, isLoaded, isSignedIn, supabase, userId]);
 
     const syncData = useCallback(async (updates = {}) => {
         if (!isSignedIn) return;
         syncQueueRef.current = syncQueueRef.current.catch(() => {}).then(async () => {
             try {
-                const token = await getToken();
                 const data = { ...readLocalData(), ...updates };
-                const response = await fetch(`${apiUrl}/api/data`, {
-                    method: 'PUT',
-                    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data),
-                });
-                if (!response.ok) throw new Error('Cloud sync failed. Your changes are still saved on this device.');
+                const { error } = await supabase
+                    .from('user_workspace_data')
+                    .upsert({ clerk_user_id: userId, data, updated_at: new Date().toISOString() });
+                if (error) throw error;
                 setSyncError('');
                 return true;
             } catch (error) {
@@ -162,7 +163,7 @@ function ClerkSessionBridge({ children }) {
             }
         });
         return syncQueueRef.current;
-    }, [getToken, isSignedIn]);
+    }, [isSignedIn, supabase, userId]);
 
     const logout = useCallback(async () => {
         const synced = await syncData();
@@ -170,7 +171,7 @@ function ClerkSessionBridge({ children }) {
         await signOut();
         localDataKeys.forEach(key => localStorage.removeItem(key));
         localStorage.removeItem(localOwnerKey);
-        document.body.classList.remove('light-theme');
+        // preserved user's display theme preference
         return true;
     }, [signOut, syncData, userId]);
 
@@ -198,7 +199,7 @@ function ClerkSessionBridge({ children }) {
 }
 
 export const AuthProvider = ({ children }) => (
-    hasClerkKey
+    hasAppConfig
         ? <ClerkSessionBridge>{children}</ClerkSessionBridge>
         : <AuthContext.Provider value={{ ...defaultContext, configured: false }}>
             {children}

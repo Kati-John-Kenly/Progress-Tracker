@@ -1,16 +1,33 @@
-# React + Vite
+## Progress Tracker
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The Vite app uses Clerk for sign-in and connects directly to Supabase Postgres with the signed-in Clerk session token. Supabase row-level security (RLS) limits each account to its own workspace. Vercel hosts the frontend; the app does not need a Render API.
 
-Currently, two official plugins are available:
+## Configure Clerk and Supabase
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+1. Create or select a Clerk application. Enable email sign-in/sign-up, add your local and Vercel URLs, and activate Clerk's Supabase integration.
+2. In Supabase, add Clerk as a third-party auth provider using the Clerk domain. Clerk session tokens must contain the `authenticated` role claim.
+3. Run [`../supabase/schema.sql`](../supabase/schema.sql) in the Supabase SQL editor.
+4. Copy `.env.example` to `.env.local` and set `VITE_CLERK_PUBLISHABLE_KEY`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_PUBLISHABLE_KEY`.
+5. Add the same three variables to Vercel for Preview and Production. Never expose a Supabase secret/service-role key in a `VITE_` variable.
 
-## React Compiler
+## Import legacy Mongo data (optional)
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Mongo is no longer used at runtime. To import existing users' routines and finances, create Clerk accounts using the same verified emails as the Mongo accounts. Set `MONGO_URI`, `CLERK_SECRET_KEY`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY` in `backend/.env`, then run from the repository root:
 
-## Expanding the ESLint configuration
+```powershell
+cd backend
+npm install
+npm run migrate:users
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+The local script imports only users with a matching verified Clerk email. It skips users who already have a Supabase workspace, so rerunning it will not overwrite newer records. Password hashes are not migrated. The service-role key is used only by the local migration script.
+
+## Run locally
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Without Clerk and Supabase public configuration, the dashboard remains available in local-only mode and indicates that account/cloud sync is not configured.
