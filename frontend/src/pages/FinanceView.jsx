@@ -1,14 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import { useContext, useState, useEffect } from 'react';
 import { Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
+import { ArrowDownLeft, ArrowUpRight } from 'lucide-react';
+import { AuthContext } from '../context/AuthState';
 
 // Register ChartJS elements
 ChartJS.register(ArcElement, Tooltip, Legend);
 
 export default function FinanceView() {
+    const { syncData } = useContext(AuthContext);
     // --- STATE MANAGEMENT ---
-    const [financeData, setFinanceData] = useState([]);
-    const [customCategories, setCustomCategories] = useState([]);
+    const [financeData, setFinanceData] = useState(() => JSON.parse(localStorage.getItem('financeData') || '[]'));
+    const [customCategories, setCustomCategories] = useState(() => JSON.parse(localStorage.getItem('financeCategories') || '[]'));
+    const [transactionFilter, setTransactionFilter] = useState('all');
     
     // Form State
     const [finType, setFinType] = useState('expense');
@@ -16,17 +20,10 @@ export default function FinanceView() {
     const [category, setCategory] = useState('Salary');
     const [newCategory, setNewCategory] = useState('');
     const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0]);
+    const [isMonthlyEstimate, setIsMonthlyEstimate] = useState(false);
     
     // Calendar View State
     const [viewDate, setViewDate] = useState(new Date());
-
-    // Load data from LocalStorage
-    useEffect(() => {
-        const savedData = JSON.parse(localStorage.getItem('financeData')) || [];
-        const savedCats = JSON.parse(localStorage.getItem('financeCategories')) || [];
-        setFinanceData(savedData);
-        setCustomCategories(savedCats);
-    }, []);
 
     // Save to LocalStorage
     useEffect(() => {
@@ -48,6 +45,9 @@ export default function FinanceView() {
         const d = new Date(t.date);
         return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     }).sort((a, b) => new Date(b.date) - new Date(a.date));
+    const displayedTransactions = transactionFilter === 'all'
+        ? monthlyTransactions
+        : monthlyTransactions.filter(transaction => transaction.type === transactionFilter);
 
     monthlyTransactions.forEach(t => {
         if (t.type === 'income') {
@@ -85,11 +85,13 @@ export default function FinanceView() {
     const handleAddTransaction = (e) => {
         e.preventDefault();
         let finalCategory = category;
+        let updatedCategories = customCategories;
 
         if (category === 'add_new_cat') {
             finalCategory = newCategory.trim();
             if (finalCategory && !customCategories.includes(finalCategory)) {
-                setCustomCategories([...customCategories, finalCategory]);
+                updatedCategories = [...customCategories, finalCategory];
+                setCustomCategories(updatedCategories);
             }
         }
 
@@ -98,19 +100,30 @@ export default function FinanceView() {
             type: finType,
             amount: parseFloat(amount),
             desc: finalCategory,
-            date: formDate
+            date: isMonthlyEstimate ? `${formDate.slice(0, 7)}-01` : formDate,
+            monthlyEstimate: isMonthlyEstimate,
         };
 
-        setFinanceData([...financeData, newTransaction]);
+        const updatedFinance = [...financeData, newTransaction];
+        setFinanceData(updatedFinance);
+        void syncData({ financeData: updatedFinance, financeCategories: updatedCategories });
         
         // Reset form
         setAmount('');
         setCategory(finType === 'income' ? 'Salary' : 'Groceries');
         setNewCategory('');
+        setIsMonthlyEstimate(false);
+        setFormDate(new Date().toISOString().split('T')[0]);
     };
 
     const handleDelete = (id) => {
-        setFinanceData(financeData.filter(t => t.id !== id));
+        const updatedFinance = financeData.filter(t => t.id !== id);
+        setFinanceData(updatedFinance);
+        void syncData({ financeData: updatedFinance });
+    };
+
+    const toggleTransactionFilter = (filter) => {
+        setTransactionFilter(current => current === filter ? 'all' : filter);
     };
 
     const changeMonth = (offset) => {
@@ -142,6 +155,7 @@ export default function FinanceView() {
             let dayExpense = 0;
             monthlyTransactions.forEach(t => {
                 if (t.date === dateStr) {
+                    if (t.monthlyEstimate) return;
                     if (t.type === 'income') dayIncome += t.amount;
                     else dayExpense += t.amount;
                 }
@@ -204,7 +218,7 @@ export default function FinanceView() {
                     
                     {/* Add Transaction Form */}
                     <div className="card">
-                        <h2 style={{ textAlign: 'center', marginBottom: '20px' }}>➕ Add Transaction</h2>
+                        <h2 className="finance-form-title">Add Transaction</h2>
                         <form onSubmit={handleAddTransaction}>
                             <div style={{ display: 'flex', justifyContent: 'center', gap: '30px', marginBottom: '20px' }}>
                                 <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -227,7 +241,18 @@ export default function FinanceView() {
                                 <input className="sleek-input" type="text" placeholder="Type new category..." value={newCategory} onChange={e => setNewCategory(e.target.value)} required />
                             )}
                             
-                            <input className="sleek-input" type="date" value={formDate} onChange={e => setFormDate(e.target.value)} required />
+                            <label className="monthly-estimate-toggle">
+                                <input type="checkbox" checked={isMonthlyEstimate} onChange={e => setIsMonthlyEstimate(e.target.checked)} />
+                                <span><strong>Monthly estimate</strong><small>Choose this if you don't know the exact date.</small></span>
+                            </label>
+                            <input
+                                className="sleek-input"
+                                type={isMonthlyEstimate ? 'month' : 'date'}
+                                aria-label={isMonthlyEstimate ? 'Expected month' : 'Transaction date'}
+                                value={isMonthlyEstimate ? formDate.slice(0, 7) : formDate}
+                                onChange={e => setFormDate(isMonthlyEstimate ? `${e.target.value}-01` : e.target.value)}
+                                required
+                            />
                             <button className="primary-btn-large" type="submit">Save Transaction</button>
                         </form>
                     </div>
@@ -287,14 +312,24 @@ export default function FinanceView() {
 
                     {/* Recent Transactions List */}
                     <div className="card">
-                        <h2 style={{ marginBottom: '15px' }}>📋 Recent Transactions</h2>
+                        <div className="finance-transactions-header">
+                            <h2>📋 Recent Transactions</h2>
+                            <div className="transaction-filters" role="group" aria-label="Filter transactions">
+                                <button type="button" className={`transaction-filter-button income-filter ${transactionFilter === 'income' ? 'selected' : ''}`} aria-pressed={transactionFilter === 'income'} onClick={() => toggleTransactionFilter('income')}>
+                                    <ArrowDownLeft size={15} aria-hidden="true" /> Income
+                                </button>
+                                <button type="button" className={`transaction-filter-button spending-filter ${transactionFilter === 'expense' ? 'selected' : ''}`} aria-pressed={transactionFilter === 'expense'} onClick={() => toggleTransactionFilter('expense')}>
+                                    <ArrowUpRight size={15} aria-hidden="true" /> Spending
+                                </button>
+                            </div>
+                        </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '250px', overflowY: 'auto' }}>
-                            {monthlyTransactions.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center' }}>No transactions in {monthNames[currentMonth]}.</p>}
-                            {monthlyTransactions.map(t => (
+                            {displayedTransactions.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center' }}>{transactionFilter === 'income' ? 'No income' : transactionFilter === 'expense' ? 'No spending' : 'No transactions'} in {monthNames[currentMonth]}.</p>}
+                            {displayedTransactions.map(t => (
                                 <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border)' }}>
                                     <div>
                                         <strong>{t.desc}</strong>
-                                        <small style={{ display: 'block', color: 'var(--text-muted)' }}>{t.date.split('-').reverse().join('-')}</small>
+                                        <small style={{ display: 'block', color: 'var(--text-muted)' }}>{t.monthlyEstimate ? `${monthNames[new Date(t.date).getMonth()]} ${new Date(t.date).getFullYear()} · monthly estimate` : t.date.split('-').reverse().join('-')}</small>
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                         <span style={{ color: t.type === 'income' ? 'var(--success)' : 'var(--danger)', fontWeight: 'bold' }}>

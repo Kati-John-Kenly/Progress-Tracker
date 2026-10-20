@@ -1,6 +1,7 @@
-import React, { useContext, useState, useEffect } from 'react';
+import { useContext, useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { AuthContext } from '../context/AuthContext';
+import { House, ListTodo, Wallet, Settings as SettingsIcon } from 'lucide-react';
+import { AuthContext } from '../context/AuthState';
 
 const DashboardLayout = () => {
     const { user, logout } = useContext(AuthContext);
@@ -17,6 +18,10 @@ const DashboardLayout = () => {
     
     const navigate = useNavigate();
     const location = useLocation(); // Used to trigger recalculations when tabs change
+    const pageTitle = location.pathname === '/routine' ? 'Routine'
+        : location.pathname === '/finance' ? 'Finance'
+        : location.pathname === '/settings' ? 'Settings'
+        : 'Dashboard';
 
     // --- CALCULATE STREAKS & LOAD DATA ---
     useEffect(() => {
@@ -168,36 +173,39 @@ const DashboardLayout = () => {
                     <h2>Progress & Productivity</h2>
                 </div>
                 <nav className="sidebar-nav">
-                    <NavLink to="/" end className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}><span className="icon">🏠</span> Home</NavLink>
-                    <NavLink to="/routine" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}><span className="icon">☑️</span> Routine</NavLink>
-                    <NavLink to="/finance" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}><span className="icon">💰</span> Finance</NavLink>
-                    <NavLink to="/settings" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}><span className="icon">⚙️</span> Settings</NavLink>
+                    <NavLink to="/" end className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}><span className="icon"><House size={20} aria-hidden="true" /></span> Home</NavLink>
+                    <NavLink to="/routine" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}><span className="icon"><ListTodo size={20} aria-hidden="true" /></span> Routine</NavLink>
+                    <NavLink to="/finance" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}><span className="icon"><Wallet size={20} aria-hidden="true" /></span> Finance</NavLink>
+                    <NavLink to="/settings" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}><span className="icon"><SettingsIcon size={20} aria-hidden="true" /></span> Settings</NavLink>
                 </nav>
             </aside>
 
             {/* MAIN CONTENT AREA */}
             <main className="main-content">
                 <header className="top-header">
-                    <h1 id="pageTitle">Dashboard</h1>
+                    <h1 id="pageTitle">{pageTitle}</h1>
                     <div className="header-right" style={{ position: 'relative' }}>
                         
                         <button className="streak-pill" onClick={() => setShowStreakModal(true)} style={{ background: 'rgba(249, 115, 22, 0.1)', color: '#f97316', border: '1px solid #f97316', transition: 'transform 0.2s' }}>
                             Streak: {streak} 🔥
                         </button>
                         
-                        <div className="user-avatar" onClick={() => setMenuOpen(!menuOpen)} style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid var(--border)' }}>👤</div>
+                        <button className="user-avatar" type="button" aria-label="Account menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)} style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid var(--border)' }}>
+                            {user?.imageUrl ? <img src={user.imageUrl} alt="" /> : user?.name?.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase() || '👤'}
+                        </button>
                         
                         {menuOpen && (
                             <div className="profile-menu" style={{ display: 'flex' }}>
                                 <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', marginBottom: '5px' }}>
-                                    <strong id="menuUserName" style={{ color: 'var(--text-main)' }}>{user ? user.name : 'Guest User'}</strong>
+                                    <strong id="menuUserName" style={{ display: 'block', color: 'var(--text-main)' }}>{user ? user.name : 'Guest User'}</strong>
+                                    {user?.email && <small style={{ display: 'block', marginTop: '4px', color: 'var(--text-muted)', overflowWrap: 'anywhere' }}>{user.email}</small>}
                                 </div>
                                 {!user ? (
-                                    <button onClick={() => { setMenuOpen(false); navigate('/settings'); }}>☁️ Login to Sync</button>
+                                    <button onClick={() => { setMenuOpen(false); navigate('/settings'); }}>Sign in or create account</button>
                                 ) : (
                                     <>
-                                        <button>👤 Edit Profile</button>
-                                        <button onClick={() => { logout(); setMenuOpen(false); }} style={{ color: 'var(--danger)', borderTop: '1px solid var(--border)', marginTop: '5px' }}>🚪 Log Out</button>
+                                        <button onClick={() => { setMenuOpen(false); navigate('/settings'); }}>Account settings</button>
+                                        <button onClick={() => { logout(); setMenuOpen(false); }} style={{ color: 'var(--danger)', borderTop: '1px solid var(--border)', marginTop: '5px' }}>Sign out</button>
                                     </>
                                 )}
                             </div>
@@ -213,19 +221,19 @@ const DashboardLayout = () => {
             {/* FLOATING BOTTOM NAV (MOBILE) */}
             <nav className="bottom-nav" aria-label="Primary navigation">
                 <NavLink to="/" end aria-label="Home" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}>
-                    <span className="icon" aria-hidden="true">🏠</span>
+                    <span className="icon"><House size={21} aria-hidden="true" /></span>
                     <span className="nav-label">Home</span>
                 </NavLink>
                 <NavLink to="/routine" aria-label="Routine" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}>
-                    <span className="icon" aria-hidden="true">☑️</span>
+                    <span className="icon"><ListTodo size={21} aria-hidden="true" /></span>
                     <span className="nav-label">Routine</span>
                 </NavLink>
                 <NavLink to="/finance" aria-label="Finance" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}>
-                    <span className="icon" aria-hidden="true">💰</span>
+                    <span className="icon"><Wallet size={21} aria-hidden="true" /></span>
                     <span className="nav-label">Finance</span>
                 </NavLink>
                 <NavLink to="/settings" aria-label="Settings" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}>
-                    <span className="icon" aria-hidden="true">⚙️</span>
+                    <span className="icon"><SettingsIcon size={21} aria-hidden="true" /></span>
                     <span className="nav-label">Settings</span>
                 </NavLink>
             </nav>

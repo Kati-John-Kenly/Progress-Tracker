@@ -3,76 +3,125 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+const { clerkMiddleware, getAuth, clerkClient } = require('@clerk/express');
+const { createClient } = require('@supabase/supabase-js');
 const User = require('./models/User');
 
 dotenv.config({ path: path.join(__dirname, '.env') });
 const app = express();
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseAdmin = supabaseUrl && supabaseServiceKey
+    ? createClient(supabaseUrl, supabaseServiceKey, { auth: { autoRefreshToken: false, persistSession: false } })
+    : null;
 
 // Middleware
 app.use(express.json());
 app.use(cors());
+if (process.env.CLERK_SECRET_KEY) app.use(clerkMiddleware());
+
+const requireClerkUser = (req, res, next) => {
+    if (!process.env.CLERK_SECRET_KEY) {
+        return res.status(503).json({ message: 'Clerk is not configured on the API.' });
+    }
+    if (!supabaseAdmin) {
+        return res.status(503).json({ message: 'Supabase is not configured on the API.' });
+    }
+
+    const { isAuthenticated, userId } = getAuth(req);
+    if (!isAuthenticated || !userId) return res.status(401).json({ message: 'Sign in to access workspace data.' });
+    req.clerkUserId = userId;
+    next();
+};
+
+const toWorkspaceData = (legacyUser) => {
+    const routineValue = legacyUser.routines;
+    let routineTasks = [];
+    if (Array.isArray(routineValue)) {
+        routineTasks = routineValue;
+    } else if (Array.isArray(routineValue?.tasks)) {
+        routineTasks = routineValue.tasks;
+    } else if (routineValue && typeof routineValue === 'object') {
+        routineTasks = Object.entries(routineValue).flatMap(([date, value]) => (
+            Array.isArray(value) ? value.map(task => ({ ...task, date: task.date || date })) : []
+        ));
+    }
+
+    return {
+        routineTasks,
+        financeData: Array.isArray(legacyUser.finances) ? legacyUser.finances : [],
+        financeCategories: [],
+        appTheme: 'dark',
+    };
+};
 
 app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected' });
+    res.json({
+        status: 'ok',
+        database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+        supabase: supabaseAdmin ? 'configured' : 'not-configured',
+        clerk: process.env.CLERK_SECRET_KEY ? 'configured' : 'not-configured',
+    });
 });
 
-// --- API ROUTES ---
-
-// 1. REGISTER NEW USER
-app.post('/api/auth/register', async (req, res) => {
+app.get('/api/data', requireClerkUser, async (req, res) => {
     try {
-        const { name, email, password, pin } = req.body;
-        
-        // Check if user exists
-        let user = await User.findOne({ email });
-        if (user) return res.status(400).json({ message: 'User already exists' });
+        const { data: record, error } = await supabaseAdmin
+            .from('user_workspace_data')
+            .select('data')
+            .eq('clerk_user_id', req.clerkUserId)
+            .maybeSingle();
+        if (error) throw error;
+        if (record) return res.json({ data: record.data, migrated: false });
 
-        // Hash the password
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(password, salt);
+        const clerkUser = await clerkClient.users.getUser(req.clerkUserId);
+        const primaryEmail = clerkUser.emailAddresses.find(address => address.id === clerkUser.primaryEmailAddressId);
+        if (primaryEmail?.verification?.status !== 'verified') return res.json({ data: null, migrated: false });
 
-        // Save User
-        user = new User({ name, email, password: hashedPassword, pin });
-        await user.save();
+        const escapedEmail = primaryEmail.emailAddress.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const legacyUser = await User.findOne({ email: new RegExp(`^${escapedEmail}$`, 'i') }).select('routines finances');
+        if (!legacyUser) return res.json({ data: null, migrated: false });
 
-        // Create JWT Token
-        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '30d' });
-        res.json({ token, user: { id: user._id, name: user.name, email: user.email } });
-
-    } catch (err) {
-        res.status(500).json({ message: 'Server error' });
+        const migratedData = toWorkspaceData(legacyUser);
+        const { error: migrationError } = await supabaseAdmin
+            .from('user_workspace_data')
+            .upsert({ clerk_user_id: req.clerkUserId, data: migratedData, updated_at: new Date().toISOString() });
+        if (migrationError) throw migrationError;
+        res.json({ data: migratedData, migrated: true });
+    } catch (error) {
+        console.error('Workspace data load failed:', error.message);
+        res.status(500).json({ message: 'Could not load workspace data.' });
     }
 });
 
-// 2. LOGIN USER
-app.post('/api/auth/login', async (req, res) => {
+app.put('/api/data', requireClerkUser, async (req, res) => {
+    const { routineTasks, financeData, financeCategories, appTheme } = req.body || {};
+    if (!Array.isArray(routineTasks) || !Array.isArray(financeData)
+        || !Array.isArray(financeCategories) || !['dark', 'light'].includes(appTheme)) {
+        return res.status(400).json({ message: 'Workspace data has an invalid format.' });
+    }
+
     try {
-        const { email, password } = req.body;
-
-        // Check if user exists
-        const user = await User.findOne({ email });
-        if (!user) return res.status(400).json({ message: 'Invalid Credentials' });
-
-        // Check Password
-        const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) return res.status(400).json({ message: 'Invalid Credentials' });
-
-        // Create JWT Token
-        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '30d' });
-        res.json({ token, user: { id: user._id, name: user.name, email: user.email } });
-
-    } catch (err) {
-        res.status(500).json({ message: 'Server error' });
+        const { error } = await supabaseAdmin
+            .from('user_workspace_data')
+            .upsert({
+                clerk_user_id: req.clerkUserId,
+                data: { routineTasks, financeData, financeCategories, appTheme },
+                updated_at: new Date().toISOString(),
+            });
+        if (error) throw error;
+        res.json({ saved: true });
+    } catch (error) {
+        console.error('Workspace data save failed:', error.message);
+        res.status(500).json({ message: 'Could not save workspace data.' });
     }
 });
 
 const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
-    if (!process.env.MONGO_URI || !process.env.JWT_SECRET) {
-        throw new Error('MONGO_URI and JWT_SECRET must be set in backend/.env');
+    if (!process.env.MONGO_URI) {
+        throw new Error('MONGO_URI must be set in backend/.env');
     }
 
     await mongoose.connect(process.env.MONGO_URI);

@@ -8,8 +8,12 @@ services:
     envVars:
       - key: MONGO_URI
         sync: false
-      - key: JWT_SECRET
-        generateValue: true
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
       - key: NODE_ENV
         value: production
 
@@ -22,6 +26,8 @@ services:
     envVars:
       - key: VITE_API_URL
         value: https://progress-tracker-api.onrender.com
+      - key: VITE_CLERK_PUBLISHABLE_KEY
+        sync: false
     routes:
       - type: rewrite
         source: /*
