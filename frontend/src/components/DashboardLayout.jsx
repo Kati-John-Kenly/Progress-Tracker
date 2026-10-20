@@ -6,6 +6,8 @@ import AIAssistantBot from './AIAssistantBot';
 import GeminiIcon from './GeminiIcon';
 import StreakFireBadge from './StreakFireBadge';
 import { subscribeWorkspaceChange, calculateStreakStats, getStoredRoutineTasks } from '../utils/workspaceEvents';
+import { hasSavedDeviceBiometric, verifyDeviceBiometric } from '../utils/deviceBiometrics';
+import { isLocalPasscodeConfigured, verifyLocalPasscode } from '../utils/localPasscode';
 
 const DAILY_NOTIF_QUOTES = [
     "Your future is created by what you do today, not tomorrow.",
@@ -14,9 +16,18 @@ const DAILY_NOTIF_QUOTES = [
     "The secret of getting ahead is getting started."
 ];
 
+const isAppLockEnabled = () => (
+    (localStorage.getItem('appFaceId') === 'true' && hasSavedDeviceBiometric()) ||
+    isLocalPasscodeConfigured()
+);
+
 const DashboardLayout = () => {
     const { user, logout } = useContext(AuthContext);
     const [menuOpen, setMenuOpen] = useState(false);
+    const [isLocked, setIsLocked] = useState(() => isAppLockEnabled());
+    const [unlockPin, setUnlockPin] = useState('');
+    const [unlockError, setUnlockError] = useState('');
+    const [isUnlocking, setIsUnlocking] = useState(false);
     
     // Streak & Modal State
     const [showStreakModal, setShowStreakModal] = useState(false);
@@ -67,6 +78,52 @@ const DashboardLayout = () => {
             window.removeEventListener('open-streak-modal', handleOpenModal);
         };
     }, [refreshData]);
+
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'hidden' && isAppLockEnabled()) {
+                setIsLocked(true);
+                setUnlockPin('');
+                setUnlockError('');
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }, []);
+
+    const unlockWithBiometric = async () => {
+        setIsUnlocking(true);
+        setUnlockError('');
+        try {
+            await verifyDeviceBiometric();
+            setIsLocked(false);
+        } catch (error) {
+            if (error.name !== 'NotAllowedError') {
+                setUnlockError(error.message || 'Biometric verification failed. Use your passcode to unlock.');
+            }
+        } finally {
+            setIsUnlocking(false);
+        }
+    };
+
+    const unlockWithPasscode = async (event) => {
+        event.preventDefault();
+        setIsUnlocking(true);
+        setUnlockError('');
+        try {
+            const isValid = await verifyLocalPasscode(unlockPin);
+            if (!isValid) {
+                setUnlockError('Incorrect passcode.');
+                return;
+            }
+            setUnlockPin('');
+            setIsLocked(false);
+        } catch (error) {
+            setUnlockError(error.message || 'Could not verify the passcode.');
+        } finally {
+            setIsUnlocking(false);
+        }
+    };
 
     // Active day tasks calculation for notification alert badges
     const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
@@ -443,6 +500,51 @@ const DashboardLayout = () => {
 
             {/* AURA PERSONAL WORKSPACE AI ASSISTANT BOT */}
             <AIAssistantBot onOpenStreakModal={() => setShowStreakModal(true)} />
+
+            {isLocked && (
+                <div className="app-lock-overlay">
+                    <section className="app-lock-card" aria-labelledby="app-lock-title">
+                        <div className="app-lock-icon">
+                            <Lock size={25} />
+                        </div>
+                        <h2 id="app-lock-title">Unlock Progress</h2>
+                        <p>Verify your identity to continue to your workspace.</p>
+                        {localStorage.getItem('appFaceId') === 'true' && hasSavedDeviceBiometric() && (
+                            <button
+                                type="button"
+                                className="app-lock-biometric-btn"
+                                onClick={unlockWithBiometric}
+                                disabled={isUnlocking}
+                            >
+                                <Smile size={18} />
+                                {isUnlocking ? 'Verifying…' : 'Use Face ID or fingerprint'}
+                            </button>
+                        )}
+                        {isLocalPasscodeConfigured() && (
+                            <form className="app-lock-passcode-form" onSubmit={unlockWithPasscode}>
+                                <label htmlFor="app-unlock-pin">Passcode</label>
+                                <div className="app-lock-passcode-row">
+                                    <input
+                                        id="app-unlock-pin"
+                                        type="password"
+                                        inputMode="numeric"
+                                        autoComplete="current-password"
+                                        maxLength={4}
+                                        pattern="[0-9]{4}"
+                                        value={unlockPin}
+                                        onChange={(event) => setUnlockPin(event.target.value.replace(/\D/g, ''))}
+                                        autoFocus={localStorage.getItem('appFaceId') !== 'true'}
+                                    />
+                                    <button type="submit" disabled={isUnlocking || unlockPin.length !== 4}>
+                                        Unlock
+                                    </button>
+                                </div>
+                            </form>
+                        )}
+                        {unlockError && <p className="app-lock-error" role="alert">{unlockError}</p>}
+                    </section>
+                </div>
+            )}
         </div>
     );
 };

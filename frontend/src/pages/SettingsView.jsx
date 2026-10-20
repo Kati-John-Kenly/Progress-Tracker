@@ -481,26 +481,34 @@ export default function SettingsView() {
                 {/* SECTION 2: SECURITY (IMAGE 2 OPTIONS INSIDE IMAGE 1 CARD) */}
                 <div className="ios-section-label">Security</div>
                 <section className="ios-card ios-card-grouped">
-                    {/* Face ID (Image 2 - Green toggle switch) */}
+                    {/* Device biometric unlock (Face ID or fingerprint, depending on the device) */}
                     <div className="ios-row">
                         <div className="ios-row-left">
                             <span className="ios-icon-box face-id-icon">
                                 <Smile size={18} />
                             </span>
                             <div className="ios-row-text">
-                                <span className="ios-row-title">Face ID</span>
+                                <span className="ios-row-title">Biometric Unlock</span>
                             </div>
                         </div>
                         <div className="ios-row-right">
+                            {faceId && (
+                                <button type="button" className="ios-biometric-test-btn" onClick={handleTestBiometric}>
+                                    Verify
+                                </button>
+                            )}
                             <IOSSwitch
                                 id="toggle-face-id"
                                 checked={faceId}
                                 onChange={toggleFaceId}
                                 activeColor="#22c55e"
-                                ariaLabel="Toggle Face ID authentication"
+                                ariaLabel="Toggle biometric unlock using Face ID or fingerprint"
                             />
                         </div>
                     </div>
+                    <p className={`ios-security-message ${securityError ? 'error' : ''}`} role="status">
+                        {securityMessage || 'Uses your device biometrics (Face ID or fingerprint). Set a passcode first for recovery.'}
+                    </p>
 
                     <div className="ios-divider" />
 
@@ -529,7 +537,13 @@ export default function SettingsView() {
                     {/* Passcode (Image 2) */}
                     <button
                         type="button"
-                        onClick={() => setActiveModal('passcode')}
+                        onClick={() => {
+                            setCurrentPin('');
+                            setTempPin('');
+                            setConfirmPin('');
+                            setPasscodeError('');
+                            setActiveModal('passcode');
+                        }}
                         className="ios-row ios-row-btn"
                     >
                         <div className="ios-row-left">
@@ -803,25 +817,55 @@ export default function SettingsView() {
                         <form onSubmit={handleSavePasscode} className="ios-passcode-form">
                             <p className="ios-modal-desc">
                                 {passcode
-                                    ? 'A passcode is configured to guard your workspace.'
+                                    ? 'Verify your current passcode before changing or removing it.'
                                     : 'Enter a 4-digit PIN for quick app protection.'}
                             </p>
+                            {passcode && (
+                                <input
+                                    type="password"
+                                    inputMode="numeric"
+                                    autoComplete="current-password"
+                                    maxLength={4}
+                                    pattern="[0-9]{4}"
+                                    value={currentPin}
+                                    onChange={(e) => setCurrentPin(e.target.value.replace(/\D/g, ''))}
+                                    placeholder="Current passcode"
+                                    aria-label="Current passcode"
+                                    className="ios-passcode-input"
+                                />
+                            )}
                             <input
                                 type="password"
+                                inputMode="numeric"
+                                autoComplete="new-password"
                                 maxLength={4}
                                 pattern="[0-9]{4}"
                                 value={tempPin}
                                 onChange={(e) => setTempPin(e.target.value.replace(/\D/g, ''))}
-                                placeholder="••••"
-                                autoFocus
+                                placeholder={passcode ? 'New 4-digit passcode' : '4-digit passcode'}
+                                aria-label={passcode ? 'New passcode' : 'Passcode'}
                                 className="ios-passcode-input"
                             />
+                            <input
+                                type="password"
+                                inputMode="numeric"
+                                autoComplete="new-password"
+                                maxLength={4}
+                                pattern="[0-9]{4}"
+                                value={confirmPin}
+                                onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ''))}
+                                placeholder="Confirm 4-digit passcode"
+                                aria-label="Confirm passcode"
+                                className="ios-passcode-input"
+                            />
+                            {passcodeError && <p className="ios-security-message error" role="alert">{passcodeError}</p>}
                             <div className="ios-modal-btn-row">
                                 {passcode && (
                                     <button
                                         type="button"
                                         onClick={handleRemovePasscode}
                                         className="ios-btn-danger"
+                                        disabled={currentPin.length !== 4}
                                     >
                                         Remove PIN
                                     </button>
