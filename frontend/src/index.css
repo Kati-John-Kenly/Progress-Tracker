@@ -240,6 +240,12 @@ body { background-color: var(--bg-dark); color: var(--text-main); height: 100dvh
 .transaction-filter-button.income-filter.selected { color: var(--success); border-color: rgba(16, 185, 129, 0.55); background: rgba(16, 185, 129, 0.08); }
 .transaction-filter-button.spending-filter.selected { color: var(--danger); border-color: rgba(239, 68, 68, 0.55); background: rgba(239, 68, 68, 0.08); }
 .transaction-filter-button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.finance-form-title { margin-bottom: 20px; color: var(--text-main); font-size: 1.15rem; font-weight: 650; }
+.monthly-estimate-toggle { display: flex; align-items: center; gap: 10px; margin: 2px 0 0; color: var(--text-main); cursor: pointer; }
+.monthly-estimate-toggle input { width: 17px; height: 17px; margin: 0; accent-color: var(--primary); }
+.monthly-estimate-toggle span { display: flex; flex-direction: column; gap: 3px; }
+.monthly-estimate-toggle strong { font-size: 0.85rem; }
+.monthly-estimate-toggle small { color: var(--text-muted); font-size: 0.76rem; }
 
 @media (max-width: 768px) {
     .settings-page { grid-template-columns: minmax(0, 1fr); gap: 14px; }
