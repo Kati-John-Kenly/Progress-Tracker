@@ -4,7 +4,7 @@ The Vite app uses Clerk for sign-in and connects directly to Supabase Postgres w
 
 ## Configure Clerk and Supabase
 
-1. Create or select a Clerk application. Enable email sign-in/sign-up, add your local and Vercel URLs, and activate Clerk's Supabase integration.
+1. Create or select a Clerk application. Enable email sign-in/sign-up and the Google social connection, add your local and Vercel URLs, and activate Clerk's Supabase integration. Google appears at the top of both account forms when enabled. Shared Google credentials are for development; configure your own Google OAuth credentials for production in Clerk.
 2. In Supabase, add Clerk as a third-party auth provider using the Clerk domain. Clerk session tokens must contain the `authenticated` role claim.
 3. Run [`../supabase/schema.sql`](../supabase/schema.sql) in the Supabase SQL editor.
 4. Copy `.env.example` to `.env.local` and set `VITE_CLERK_PUBLISHABLE_KEY`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_PUBLISHABLE_KEY`.

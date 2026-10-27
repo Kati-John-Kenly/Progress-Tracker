@@ -44,6 +44,11 @@ import {
 } from '../utils/localPasscode';
 
 const backupFormat = 'progress-workspace-backup';
+const clerkAuthAppearance = {
+    layout: {
+        socialButtonsPlacement: 'top'
+    }
+};
 
 // Clean iOS Toggle Switch component matching Image 1 & Image 2
 function IOSSwitch({ checked, onChange, activeColor = '#22c55e', id, ariaLabel }) {
@@ -1063,9 +1068,9 @@ export default function SettingsView() {
                         </div>
                         <div className="ios-clerk-container">
                             {authMode === 'sign-in' ? (
-                                <SignIn routing="virtual" />
+                                <SignIn appearance={clerkAuthAppearance} routing="virtual" />
                             ) : (
-                                <SignUp routing="virtual" />
+                                <SignUp appearance={clerkAuthAppearance} routing="virtual" />
                             )}
                         </div>
                     </div>
