@@ -6,18 +6,15 @@ import { applyAppTheme } from '../utils/workspaceEvents';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-const hasClerkConfig = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 const hasSupabaseConfig = Boolean(supabaseUrl && supabasePublishableKey);
-const cloudSyncUnavailableMessage = 'Cloud workspace sync is unavailable until VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY are configured. Your data remains on this device.';
+const hasAppConfig = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY) && hasSupabaseConfig;
 
 const defaultContext = {
     user: null,
     loading: false,
-    configured: hasClerkConfig,
-    syncAvailable: hasClerkConfig && hasSupabaseConfig,
+    configured: hasAppConfig,
     syncError: '',
     syncData: async () => {},
-    updateUserName: async () => false,
     logout: async () => {},
 };
 
@@ -71,13 +68,11 @@ function ClerkSessionBridge({ children }) {
     const { user: clerkUser } = useUser();
     const { signOut } = useClerk();
     const [hydratedUserId, setHydratedUserId] = useState(null);
-    const [syncError, setSyncError] = useState(hasSupabaseConfig ? '' : cloudSyncUnavailableMessage);
+    const [syncError, setSyncError] = useState('');
     const syncQueueRef = useRef(Promise.resolve());
-    const supabase = useMemo(() => hasSupabaseConfig
-        ? createClient(supabaseUrl, supabasePublishableKey, {
-            accessToken: async () => getToken(),
-        })
-        : null, [getToken]);
+    const supabase = useMemo(() => createClient(supabaseUrl, supabasePublishableKey, {
+        accessToken: async () => getToken(),
+    }), [getToken]);
 
     useEffect(() => {
         if (!isLoaded || !isSignedIn || !userId) return;
@@ -89,10 +84,6 @@ function ClerkSessionBridge({ children }) {
         if ((storedOwnerId && storedOwnerId !== userId) || (!storedOwnerId && !legacyAccountMatches)) {
             localDataKeys.forEach(key => localStorage.removeItem(key));
             localStorage.removeItem(localOwnerKey);
-        }
-
-        if (!supabase) {
-            return () => { active = false; };
         }
 
         const hydrateUserData = async () => {
@@ -157,10 +148,6 @@ function ClerkSessionBridge({ children }) {
 
     const syncData = useCallback(async (updates = {}) => {
         if (!isSignedIn) return;
-        if (!supabase) {
-            setSyncError(cloudSyncUnavailableMessage);
-            return false;
-        }
         syncQueueRef.current = syncQueueRef.current.catch(() => {}).then(async () => {
             try {
                 const data = { ...readLocalData(), ...updates };
@@ -178,12 +165,6 @@ function ClerkSessionBridge({ children }) {
         return syncQueueRef.current;
     }, [isSignedIn, supabase, userId]);
 
-    const updateUserName = useCallback(async (firstName, lastName) => {
-        if (!isSignedIn || !clerkUser) return false;
-        await clerkUser.update({ firstName, lastName });
-        return true;
-    }, [clerkUser, isSignedIn]);
-
     const logout = useCallback(async () => {
         const synced = await syncData();
         if (!synced) localStorage.setItem(offlineBackupKey(userId), JSON.stringify(readLocalData()));
@@ -197,24 +178,18 @@ function ClerkSessionBridge({ children }) {
     const user = useMemo(() => clerkUser ? {
         id: userId,
         name: clerkUser.fullName || clerkUser.firstName || 'Progress user',
-        firstName: clerkUser.firstName || '',
-        lastName: clerkUser.lastName || '',
         email: clerkUser.primaryEmailAddress?.emailAddress || '',
         imageUrl: clerkUser.imageUrl,
     } : null, [clerkUser, userId]);
-    const loading = !isLoaded || (
-        hasSupabaseConfig && Boolean(isSignedIn) && hydratedUserId !== userId
-    );
+    const loading = !isLoaded || (Boolean(isSignedIn) && hydratedUserId !== userId);
     const value = useMemo(() => ({
         user,
         loading,
         configured: true,
-        syncAvailable: hasSupabaseConfig,
         syncError,
         syncData,
-        updateUserName,
         logout,
-    }), [user, loading, syncError, syncData, updateUserName, logout]);
+    }), [user, loading, syncError, syncData, logout]);
 
     return (
         <AuthContext.Provider value={value}>
@@ -224,7 +199,7 @@ function ClerkSessionBridge({ children }) {
 }
 
 export const AuthProvider = ({ children }) => (
-    hasClerkConfig
+    hasAppConfig
         ? <ClerkSessionBridge>{children}</ClerkSessionBridge>
         : <AuthContext.Provider value={{ ...defaultContext, configured: false }}>
             {children}

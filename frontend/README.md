@@ -1,29 +1,14 @@
 ## Progress Tracker
 
-The Vite app uses Clerk for sign-in. When Supabase is configured, it syncs workspace data directly to Supabase Postgres with the signed-in Clerk session token; Supabase row-level security (RLS) limits each account to its own workspace. Without Supabase configuration, sign-in still works and workspace data stays on the device. Vercel hosts the frontend; the app does not need a Render API.
+The Vite app uses Clerk for sign-in and connects directly to Supabase Postgres with the signed-in Clerk session token. Supabase row-level security (RLS) limits each account to its own workspace. Vercel hosts the frontend; the app does not need a Render API.
 
 ## Configure Clerk and Supabase
 
 1. Create or select a Clerk application. Enable email sign-in/sign-up, add your local and Vercel URLs, and activate Clerk's Supabase integration.
 2. In Supabase, add Clerk as a third-party auth provider using the Clerk domain. Clerk session tokens must contain the `authenticated` role claim.
 3. Run [`../supabase/schema.sql`](../supabase/schema.sql) in the Supabase SQL editor.
-4. Set `VITE_CLERK_PUBLISHABLE_KEY` in `.env.local`; this public key is required for sign-in and sign-up.
-5. To enable cloud workspace sync, also set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. If either is missing, authentication remains available but cloud sync is disabled and the app reports that data is saved on this device.
-6. Add the Clerk key to Vercel for Preview and Production, and add the two Supabase variables there when enabling cloud sync. Never expose a Supabase secret/service-role key in a `VITE_` variable.
-
-### Enable Google sign-in and sign-up
-
-Google is a Clerk social connection; Clerk remains the authentication provider, so its normal session and the existing Supabase sync continue to apply. In the Clerk Dashboard, select the app instance and open **SSO connections**:
-
-1. Select **Add connection → For all users → Google**.
-2. For a development instance, Clerk's shared Google OAuth credentials are preconfigured; save the connection.
-3. For a production instance, enable **Enable for sign-up and sign-in** and **Use custom credentials**. Copy the **Authorized Redirect URI** Clerk displays.
-4. In Google Cloud Console, select or create a project, open **APIs & Services → Credentials → Create Credentials → OAuth client ID**, and use **Web application**. Configure the authorized JavaScript origins with the deployed app origin (and `http://localhost:PORT` for local testing); paste Clerk's URI into **Authorized Redirect URIs**. If prompted, configure the OAuth consent screen first.
-5. Create the client, then enter its client ID and client secret in the corresponding fields in Clerk's Google connection and select **Save**. Keep the secret in Clerk only; never put it in frontend environment variables or source code.
-
-Once enabled, Clerk's existing sign-in and sign-up components display Google alongside email/password; no frontend provider credentials or account migration are needed. During sign-up, the optional name, mobile, age, and gender fields are user-entered and stored only in that browser. Google does not supply or verify those values.
-
-See Clerk's [Google social connection guide](https://clerk.com/docs/guides/configure/auth-strategies/social-connections/google) for dashboard screenshots and current provider-specific requirements.
+4. Copy `.env.example` to `.env.local` and set `VITE_CLERK_PUBLISHABLE_KEY`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_PUBLISHABLE_KEY`.
+5. Add the same three variables to Vercel for Preview and Production. Never expose a Supabase secret/service-role key in a `VITE_` variable.
 
 ## Import legacy Mongo data (optional)
 
@@ -46,7 +31,3 @@ npm run dev
 ```
 
 Without Clerk and Supabase public configuration, the dashboard remains available in local-only mode and indicates that account/cloud sync is not configured.
-
-## Install and update on mobile
-
-The production site is installable as a web app on supported browsers. Open **Settings → App & Updates** and choose **Install app**; on iPhone or iPad, use Safari's **Share → Add to Home Screen** option. Choose **Download new update** to check for a newly deployed build and apply it. Updates are served by the site deployment; this button does not download a separate native app package.

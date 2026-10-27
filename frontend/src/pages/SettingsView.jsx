@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useEffect, useState, useMemo } from 'react';
 import { SignIn, SignUp } from '@clerk/react';
 import {
     Moon,
@@ -21,21 +21,15 @@ import {
     Upload,
     UserRound,
     Lock,
-    Pencil,
-    Save,
-    LoaderCircle,
     Sparkles,
     Shield,
     Share2,
     Copy,
     MessageCircle,
-    Link2,
-    GraduationCap,
-    RefreshCw
+    Link2
 } from 'lucide-react';
 import { AuthContext } from '../context/AuthState';
 import { applyAppTheme, getStoredTheme, subscribeWorkspaceChange } from '../utils/workspaceEvents';
-import { canInstallProgressApp, promptInstallProgressApp } from '../utils/appInstall';
 import {
     hasSavedDeviceBiometric,
     registerDeviceBiometric,
@@ -50,24 +44,6 @@ import {
 } from '../utils/localPasscode';
 
 const backupFormat = 'progress-workspace-backup';
-const studentProfileKey = 'progressStudentProfile';
-const emptyStudentProfile = { name: '', mobile: '', age: '', gender: '' };
-
-const readStudentProfile = () => {
-    try {
-        const savedProfile = JSON.parse(localStorage.getItem(studentProfileKey) || 'null');
-        return savedProfile && typeof savedProfile === 'object'
-            ? {
-                name: typeof savedProfile.name === 'string' ? savedProfile.name : '',
-                mobile: typeof savedProfile.mobile === 'string' ? savedProfile.mobile : '',
-                age: typeof savedProfile.age === 'string' ? savedProfile.age : '',
-                gender: typeof savedProfile.gender === 'string' ? savedProfile.gender : '',
-            }
-            : emptyStudentProfile;
-    } catch {
-        return emptyStudentProfile;
-    }
-};
 
 // Clean iOS Toggle Switch component matching Image 1 & Image 2
 function IOSSwitch({ checked, onChange, activeColor = '#22c55e', id, ariaLabel }) {
@@ -90,7 +66,7 @@ function IOSSwitch({ checked, onChange, activeColor = '#22c55e', id, ariaLabel }
 }
 
 export default function SettingsView() {
-    const { user, logout, loading, configured, syncAvailable, syncError, syncData, updateUserName } = useContext(AuthContext);
+    const { user, logout, loading, configured, syncError, syncData } = useContext(AuthContext);
 
     // General options (Image 1 & 2)
     const [theme, setTheme] = useState(() => getStoredTheme());
@@ -117,26 +93,11 @@ export default function SettingsView() {
     const [tempPin, setTempPin] = useState('');
     const [confirmPin, setConfirmPin] = useState('');
     const [authMode, setAuthMode] = useState('sign-in');
-    const [signupStep, setSignupStep] = useState('profile');
-    const [studentProfile, setStudentProfile] = useState(readStudentProfile);
-    const [profileError, setProfileError] = useState('');
-    const [isEditingName, setIsEditingName] = useState(false);
-    const [nameDraft, setNameDraft] = useState({ firstName: '', lastName: '' });
-    const [nameError, setNameError] = useState('');
-    const [nameMessage, setNameMessage] = useState('');
-    const [isSavingName, setIsSavingName] = useState(false);
 
     // Backup state
     const [backupFile, setBackupFile] = useState(null);
     const [backupMessage, setBackupMessage] = useState('');
     const [backupError, setBackupError] = useState(false);
-    const [installPromptAvailable, setInstallPromptAvailable] = useState(canInstallProgressApp);
-    const [installMessage, setInstallMessage] = useState('');
-    const [isCheckingForUpdate, setIsCheckingForUpdate] = useState(false);
-    const [updateMessage, setUpdateMessage] = useState('');
-    const [isAppInstalled, setIsAppInstalled] = useState(() => (
-        window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
-    ));
 
     // Listen for theme changes across the workspace
     useEffect(() => {
@@ -146,21 +107,6 @@ export default function SettingsView() {
             }
         });
         return unsubscribe;
-    }, []);
-
-    useEffect(() => {
-        const handleInstallAvailable = () => setInstallPromptAvailable(canInstallProgressApp());
-        const handleInstalled = () => {
-            setInstallPromptAvailable(false);
-            setIsAppInstalled(true);
-            setInstallMessage('Progress has been installed on this device.');
-        };
-        window.addEventListener('progressappinstallavailable', handleInstallAvailable);
-        window.addEventListener('appinstalled', handleInstalled);
-        return () => {
-            window.removeEventListener('progressappinstallavailable', handleInstallAvailable);
-            window.removeEventListener('appinstalled', handleInstalled);
-        };
     }, []);
 
     // Calculate real localStorage usage
@@ -193,106 +139,6 @@ export default function SettingsView() {
         applyAppTheme(next);
         setTheme(next);
         void syncData({ appTheme: next });
-    };
-
-    const handleInstallApp = async () => {
-        setInstallMessage('');
-        try {
-            const installChoice = await promptInstallProgressApp();
-            if (installChoice) {
-                setInstallPromptAvailable(false);
-                setIsAppInstalled(installChoice.outcome === 'accepted');
-                setInstallMessage(installChoice.outcome === 'accepted'
-                    ? 'Progress is being installed on this device.'
-                    : 'Installation was cancelled.');
-                return;
-            }
-
-            const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent)
-                || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-            setInstallMessage(isAppInstalled
-                ? 'Progress is already installed on this device.'
-                : isIOS
-                    ? 'To install, tap Share in Safari, then choose Add to Home Screen.'
-                    : 'Open your browser menu and choose Install app or Add to Home Screen.');
-        } catch (error) {
-            console.error('Progress app installation failed:', error);
-            setInstallMessage(error.message || 'Could not start installation. Please try again.');
-        }
-    };
-
-    const handleDownloadUpdate = async () => {
-        if (!('serviceWorker' in navigator)) {
-            setUpdateMessage('This browser cannot install app updates. Reload the page to get the latest version.');
-            return;
-        }
-
-        setIsCheckingForUpdate(true);
-        setUpdateMessage('Checking for updates…');
-        try {
-            const registration = await navigator.serviceWorker.getRegistration('/');
-            if (!registration) {
-                setUpdateMessage('Update support is not ready yet. Reload the page and try again.');
-                return;
-            }
-
-            await registration.update();
-            let waitingWorker = registration.waiting;
-
-            if (!waitingWorker && registration.installing) {
-                const installingWorker = registration.installing;
-                await new Promise((resolve, reject) => {
-                    const timeout = window.setTimeout(
-                        () => reject(new Error('The update check timed out. Try again when you have a stable connection.')),
-                        20000,
-                    );
-                    const finish = (hasUpdate) => {
-                        window.clearTimeout(timeout);
-                        resolve(hasUpdate);
-                    };
-                    const handleStateChange = () => {
-                        if (installingWorker.state === 'installed' || installingWorker.state === 'redundant') {
-                            finish(installingWorker.state === 'installed');
-                        }
-                    };
-                    installingWorker.addEventListener('statechange', handleStateChange);
-                    handleStateChange();
-                });
-                waitingWorker = registration.waiting;
-            }
-
-            if (!waitingWorker) {
-                setUpdateMessage('You are using the latest version.');
-                return;
-            }
-
-            setUpdateMessage('Downloading and applying the update…');
-            const activated = new Promise((resolve, reject) => {
-                const timeout = window.setTimeout(
-                    () => reject(new Error('The update could not be activated. Please reload and try again.')),
-                    20000,
-                );
-                const handleStateChange = () => {
-                    if (waitingWorker.state === 'activated') {
-                        window.clearTimeout(timeout);
-                        resolve();
-                    } else if (waitingWorker.state === 'redundant') {
-                        window.clearTimeout(timeout);
-                        reject(new Error('The update was interrupted. Please try again.'));
-                    }
-                };
-                waitingWorker.addEventListener('statechange', handleStateChange);
-                handleStateChange();
-            });
-            waitingWorker.postMessage({ type: 'SKIP_WAITING' });
-            await activated;
-            window.location.reload();
-        } catch (error) {
-            console.error('Progress update check failed:', error);
-            setUpdateMessage(error.message || 'Could not check for updates. Please try again.');
-        } finally {
-            setIsCheckingForUpdate(false);
-        }
     };
 
     const toggleNotifications = (val) => {
@@ -502,76 +348,8 @@ export default function SettingsView() {
               .toUpperCase()
         : 'U';
 
-    const displayName = user?.name || studentProfile.name || 'Workspace User';
+    const displayName = user?.name || 'Workspace User';
     const displayEmail = user?.email || 'Local Offline Account';
-
-    const startEditingName = () => {
-        if (user) {
-            setNameDraft({
-                firstName: user.firstName || '',
-                lastName: user.lastName || '',
-            });
-        } else {
-            const parts = studentProfile.name.trim().split(/\s+/).filter(Boolean);
-            setNameDraft({ firstName: parts[0] || '', lastName: parts.slice(1).join(' ') });
-        }
-        setNameError('');
-        setNameMessage('');
-        setIsEditingName(true);
-    };
-
-    const cancelEditingName = () => {
-        setIsEditingName(false);
-        setNameError('');
-    };
-
-    const handleNameSubmit = async (event) => {
-        event.preventDefault();
-        const firstName = nameDraft.firstName.trim();
-        const lastName = nameDraft.lastName.trim();
-        if (!firstName) {
-            setNameError('Enter a first name to continue.');
-            return;
-        }
-        if (`${firstName} ${lastName}`.length > 100) {
-            setNameError('Your name must be 100 characters or fewer.');
-            return;
-        }
-
-        setNameError('');
-        setNameMessage('');
-        setIsSavingName(true);
-        try {
-            if (user) {
-                await updateUserName(firstName, lastName || null);
-            } else {
-                const updatedProfile = { ...studentProfile, name: [firstName, lastName].filter(Boolean).join(' ') };
-                localStorage.setItem(studentProfileKey, JSON.stringify(updatedProfile));
-                setStudentProfile(updatedProfile);
-            }
-            setIsEditingName(false);
-            setNameMessage('Name updated successfully.');
-        } catch {
-            setNameError('Your name could not be updated. Check your connection and account settings, then try again.');
-        } finally {
-            setIsSavingName(false);
-        }
-    };
-
-    const handleStudentProfileSubmit = (event) => {
-        event.preventDefault();
-        setProfileError('');
-        try {
-            localStorage.setItem(studentProfileKey, JSON.stringify(studentProfile));
-            if (!configured) {
-                setProfileError('Your profile is saved in this browser. Account sign-up requires VITE_CLERK_PUBLISHABLE_KEY.');
-                return;
-            }
-            setSignupStep('credentials');
-        } catch {
-            setProfileError('Your profile could not be saved in this browser. Check available storage and try again.');
-        }
-    };
 
     return (
         <div className="view-section active">
@@ -596,81 +374,22 @@ export default function SettingsView() {
                             </div>
                         )}
                         <div className="ios-profile-text">
-                            {isEditingName ? (
-                                <form className="ios-profile-edit-form" onSubmit={handleNameSubmit}>
-                                    <div className="ios-profile-edit-fields">
-                                        <label>
-                                            <span>First name</span>
-                                            <input
-                                                autoComplete="given-name"
-                                                autoFocus
-                                                maxLength={100}
-                                                value={nameDraft.firstName}
-                                                aria-invalid={Boolean(nameError)}
-                                                aria-describedby={nameError ? 'profile-name-error' : undefined}
-                                                onChange={(event) => setNameDraft({ ...nameDraft, firstName: event.target.value })}
-                                                disabled={isSavingName}
-                                            />
-                                        </label>
-                                        <label>
-                                            <span>Last name</span>
-                                            <input
-                                                autoComplete="family-name"
-                                                maxLength={100}
-                                                value={nameDraft.lastName}
-                                                aria-invalid={Boolean(nameError)}
-                                                aria-describedby={nameError ? 'profile-name-error' : undefined}
-                                                onChange={(event) => setNameDraft({ ...nameDraft, lastName: event.target.value })}
-                                                disabled={isSavingName}
-                                            />
-                                        </label>
-                                    </div>
-                                    {nameError && <p id="profile-name-error" className="ios-profile-feedback is-error" role="alert">{nameError}</p>}
-                                    <div className="ios-profile-edit-actions">
-                                        <button className="ios-profile-edit-btn is-save" type="submit" disabled={isSavingName}>
-                                            <Save size={14} /> {isSavingName ? 'Saving…' : 'Save'}
-                                        </button>
-                                        <button className="ios-profile-edit-btn" type="button" onClick={cancelEditingName} disabled={isSavingName}>
-                                            <X size={14} /> Cancel
-                                        </button>
-                                    </div>
-                                </form>
-                            ) : (
-                                <>
-                                    <h2 className="ios-profile-name">{displayName}</h2>
-                                    <button
-                                        type="button"
-                                        className="ios-profile-name-edit"
-                                        onClick={startEditingName}
-                                        aria-label={`Edit name, currently ${displayName}`}
-                                    >
-                                        <Pencil size={13} /> Edit name
-                                    </button>
-                                </>
-                            )}
+                            <h2 className="ios-profile-name">{displayName}</h2>
                             <p className="ios-profile-email">{displayEmail}</p>
-                            {nameMessage && !isEditingName && <p className="ios-profile-feedback is-success" role="status">{nameMessage}</p>}
                         </div>
                     </div>
 
                     <div className="ios-profile-actions">
                         {user ? (
                             <div className="ios-profile-sync-row">
-                                {syncAvailable ? (
-                                    <span className="ios-status-badge">
-                                        <Check size={13} strokeWidth={2.5} /> Connected to Cloud
-                                    </span>
-                                ) : (
-                                    <span className="ios-status-badge">
-                                        <HardDrive size={13} /> Saved on this device
-                                    </span>
-                                )}
+                                <span className="ios-status-badge">
+                                    <Check size={13} strokeWidth={2.5} /> Connected to Cloud
+                                </span>
                                 <button
                                     type="button"
                                     onClick={syncData}
                                     className="ios-sync-btn"
-                                    disabled={!syncAvailable}
-                                    title={syncAvailable ? 'Synchronize records with cloud' : 'Cloud sync requires Supabase configuration'}
+                                    title="Synchronize records with cloud"
                                 >
                                     <Cloud size={14} /> Sync
                                 </button>
@@ -931,37 +650,6 @@ export default function SettingsView() {
                             {backupMessage}
                         </p>
                     )}
-                </section>
-
-                <div className="ios-section-label">App & Updates</div>
-                <section className="ios-card ios-app-updates-card">
-                    <p className="ios-app-updates-description">
-                        Install Progress on your phone and keep the latest version.
-                    </p>
-                    <div className="ios-app-update-actions">
-                        <button
-                            type="button"
-                            onClick={handleInstallApp}
-                            className="ios-app-update-btn"
-                            disabled={isAppInstalled}
-                        >
-                            <Download size={17} />
-                            {isAppInstalled ? 'Installed' : installPromptAvailable ? 'Install app' : 'Install on device'}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={handleDownloadUpdate}
-                            className="ios-app-update-btn is-primary"
-                            disabled={isCheckingForUpdate}
-                        >
-                            {isCheckingForUpdate
-                                ? <LoaderCircle size={17} className="ios-app-update-spinner" />
-                                : <RefreshCw size={17} />}
-                            {isCheckingForUpdate ? 'Checking…' : 'Download new update'}
-                        </button>
-                    </div>
-                    {installMessage && <p className="ios-app-update-message" role="status">{installMessage}</p>}
-                    {updateMessage && <p className="ios-app-update-message" role="status">{updateMessage}</p>}
                 </section>
 
                 {/* SECTION 4: ABOUT, PRIVACY & LOGOUT (IMAGE 1 TEMPLATE) */}
@@ -1351,133 +1039,35 @@ export default function SettingsView() {
             {activeModal === 'auth' && (
                 <div className="ios-modal-overlay" onClick={() => setActiveModal(null)}>
                     <div className="ios-modal-box ios-modal-auth" onClick={(e) => e.stopPropagation()}>
-                        <button
-                            type="button"
-                            onClick={() => setActiveModal(null)}
-                            className="ios-modal-close ios-auth-close"
-                            aria-label="Close sign in"
-                        >
-                            <X size={20} />
-                        </button>
-                        <div className="ios-auth-heading">
-                            <span className="ios-auth-icon"><GraduationCap size={24} /></span>
-                            <div>
-                                <span className="ios-auth-eyebrow">PROGRESS</span>
-                                <h3>{authMode === 'sign-in' ? 'Sign in to Progress' : 'Create your profile'}</h3>
-                            </div>
+                        <div className="ios-modal-header">
+                            <h3>{authMode === 'sign-in' ? 'Sign In to Progress' : 'Create an Account'}</h3>
+                            <button type="button" onClick={() => setActiveModal(null)} className="ios-modal-close">
+                                <X size={18} />
+                            </button>
                         </div>
-                        <p className="ios-auth-description">
-                            {authMode === 'sign-in'
-                                ? 'Sign in with Google or email and password to sync your routines and progress across devices.'
-                                : 'Create your secure account with Google or email and password. The profile details below are optional.'}
-                        </p>
                         <div className="ios-auth-segmented">
                             <button
                                 type="button"
                                 className={authMode === 'sign-in' ? 'active' : ''}
-                                onClick={() => {
-                                    setAuthMode('sign-in');
-                                    setSignupStep('profile');
-                                    setProfileError('');
-                                }}
+                                onClick={() => setAuthMode('sign-in')}
                             >
                                 Sign In
                             </button>
                             <button
                                 type="button"
                                 className={authMode === 'sign-up' ? 'active' : ''}
-                                onClick={() => {
-                                    setAuthMode('sign-up');
-                                    setSignupStep('profile');
-                                    setProfileError('');
-                                }}
+                                onClick={() => setAuthMode('sign-up')}
                             >
-                                Sign Up
+                                Create Account
                             </button>
                         </div>
-                        {authMode === 'sign-in' ? (
-                            configured ? (
-                                <div className="ios-clerk-container">
-                                    <SignIn routing="virtual" />
-                                </div>
+                        <div className="ios-clerk-container">
+                            {authMode === 'sign-in' ? (
+                                <SignIn routing="virtual" />
                             ) : (
-                                <p className="ios-auth-note" role="status">
-                                    Account sign-in requires VITE_CLERK_PUBLISHABLE_KEY. Your workspace remains available on this device.
-                                </p>
-                            )
-                        ) : signupStep === 'profile' ? (
-                            <form className="ios-student-profile-form" onSubmit={handleStudentProfileSubmit}>
-                                <label className="ios-auth-field">
-                                    <span>Full name</span>
-                                    <input
-                                        type="text"
-                                        autoComplete="name"
-                                        maxLength={100}
-                                        value={studentProfile.name}
-                                        placeholder="e.g., Alex Morgan"
-                                        onChange={(event) => setStudentProfile({ ...studentProfile, name: event.target.value })}
-                                    />
-                                </label>
-                                <label className="ios-auth-field">
-                                    <span>Mobile number</span>
-                                    <input
-                                        type="tel"
-                                        autoComplete="tel"
-                                        inputMode="tel"
-                                        maxLength={20}
-                                        value={studentProfile.mobile}
-                                        placeholder="e.g., +1 555 123 4567"
-                                        onChange={(event) => setStudentProfile({ ...studentProfile, mobile: event.target.value })}
-                                    />
-                                </label>
-                                <label className="ios-auth-field">
-                                    <span>Age</span>
-                                    <input
-                                        type="number"
-                                        value={studentProfile.age}
-                                        placeholder="Enter your age"
-                                        onChange={(event) => setStudentProfile({ ...studentProfile, age: event.target.value })}
-                                    />
-                                </label>
-                                <label className="ios-auth-field">
-                                    <span>Gender</span>
-                                    <select
-                                        value={studentProfile.gender}
-                                        onChange={(event) => setStudentProfile({ ...studentProfile, gender: event.target.value })}
-                                    >
-                                        <option value="" disabled>Select your gender</option>
-                                        <option value="Woman">Woman</option>
-                                        <option value="Man">Man</option>
-                                        <option value="Non-binary">Non-binary</option>
-                                        <option value="Other">Other</option>
-                                        <option value="Prefer not to say">Prefer not to say</option>
-                                    </select>
-                                </label>
-                                {profileError && <p className="ios-auth-error" role="alert">{profileError}</p>}
-                                <button className="ios-auth-continue" type="submit">Continue to account</button>
-                                <p className="ios-auth-note">
-                                    Optional details are saved only in this browser. Google does not provide or verify your mobile number, age, or gender. Continue to choose Google or email and password.
-                                </p>
-                            </form>
-                        ) : (
-                            <div className="ios-clerk-container">
-                                {(studentProfile.name || studentProfile.mobile || studentProfile.age || studentProfile.gender) && (
-                                    <div className="ios-auth-profile-summary">
-                                        <span>Optional details saved on this browser</span>
-                                        <span>{studentProfile.name || 'Name not provided'}</span>
-                                        <span>{studentProfile.mobile || 'Mobile not provided'} · Age {studentProfile.age || 'not provided'} · {studentProfile.gender || 'Gender not provided'}</span>
-                                        <button
-                                            type="button"
-                                            onClick={() => setSignupStep('profile')}
-                                            className="ios-auth-edit-profile"
-                                        >
-                                            Edit details
-                                        </button>
-                                    </div>
-                                )}
                                 <SignUp routing="virtual" />
-                            </div>
-                        )}
+                            )}
+                        </div>
                     </div>
                 </div>
             )}

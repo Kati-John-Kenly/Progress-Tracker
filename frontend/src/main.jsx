@@ -9,14 +9,6 @@ import { applyAppTheme, getStoredTheme } from './utils/workspaceEvents'
 applyAppTheme(getStoredTheme())
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
-if (import.meta.env.PROD && 'serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((error) => {
-      console.error('Progress service worker registration failed:', error)
-    })
-  })
-}
-
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     {clerkPublishableKey ? (
