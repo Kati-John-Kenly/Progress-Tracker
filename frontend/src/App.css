@@ -37,19 +37,6 @@ body { background-color: var(--bg-dark); color: var(--text-main); height: 100dvh
 .view-section { display: none; }
 .view-section.active { display: block; animation: fadeIn 0.3s; }
 
-/* REDESIGNED AUTHENTICATION STYLES */
-.auth-container { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: var(--bg-dark); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 20px;}
-.auth-card { max-width: 400px; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--bg-card); padding: 30px; border-radius: 16px; border: 1px solid var(--border);}
-.app-icon-large { width: 80px; height: 80px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
-
-.primary-btn-large { background: var(--primary); color: white; border: none; width: 100%; padding: 14px; font-size: 1.05rem; font-weight: 600; border-radius: 12px; cursor: pointer; transition: background 0.2s;}
-.primary-btn-large:hover { background: var(--primary-hover); }
-
-.google-btn-dark { background: transparent; color: var(--text-main); border: 1px solid var(--border); width: 100%; padding: 14px; font-size: 1.05rem; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 10px; border-radius: 12px; cursor: pointer; margin-top: 10px;}
-.sleek-input { width: 100%; padding: 14px; background: rgba(255,255,255,0.05); border: 1px solid var(--border); color: white; border-radius: 12px; font-size: 1rem; outline: none; margin-bottom: 12px;}
-.sleek-input:focus { border-color: var(--primary); }
-.text-center { text-align: center; }
-
 /* GRID LAYOUTS */
 .home-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
 .home-left-col, .home-right-col { display: flex; flex-direction: column; gap: 24px; }

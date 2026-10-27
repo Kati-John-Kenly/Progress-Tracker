@@ -1,10 +1,8 @@
-import { useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { House, ListTodo, Wallet, Settings as SettingsIcon, Sparkles, Bell, X, ChevronRight, Flame, Quote } from 'lucide-react';
-import { AuthContext } from '../context/AuthState';
+import { House, ListTodo, Wallet, Settings as SettingsIcon, Sparkles, Bell, X, ChevronRight, Flame, Quote, BarChart3, Search, Smile } from 'lucide-react';
 import AIAssistantBot from './AIAssistantBot';
 import GeminiIcon from './GeminiIcon';
-import StreakFireBadge from './StreakFireBadge';
 import { subscribeWorkspaceChange, calculateStreakStats, getStoredRoutineTasks } from '../utils/workspaceEvents';
 import { hasSavedDeviceBiometric, verifyDeviceBiometric } from '../utils/deviceBiometrics';
 import { isLocalPasscodeConfigured, verifyLocalPasscode } from '../utils/localPasscode';
@@ -16,14 +14,22 @@ const DAILY_NOTIF_QUOTES = [
     "The secret of getting ahead is getting started."
 ];
 
+const primaryNavigation = [
+    { to: '/', label: 'Dashboard', icon: House, end: true },
+    { to: '/routine', label: 'Habits', icon: ListTodo, end: true },
+    { to: '/finance', label: 'Finance', icon: Wallet, end: true },
+    { to: '/analytics', label: 'Analytics', icon: BarChart3 },
+    { to: '/settings', label: 'Settings', icon: SettingsIcon }
+];
+
 const isAppLockEnabled = () => (
     (localStorage.getItem('appFaceId') === 'true' && hasSavedDeviceBiometric()) ||
     isLocalPasscodeConfigured()
 );
 
 const DashboardLayout = () => {
-    const { user, logout } = useContext(AuthContext);
     const [menuOpen, setMenuOpen] = useState(false);
+    const [headerSearch, setHeaderSearch] = useState('');
     const [isLocked, setIsLocked] = useState(() => isAppLockEnabled());
     const [unlockPin, setUnlockPin] = useState('');
     const [unlockError, setUnlockError] = useState('');
@@ -51,11 +57,12 @@ const DashboardLayout = () => {
     
     const navigate = useNavigate();
     const location = useLocation();
-    const pageTitle = location.pathname === '/routine' ? 'Routine'
-        : location.pathname === '/finance' ? 'Finance'
-        : location.pathname === '/settings' ? 'Settings'
-        : 'Dashboard';
-
+    const pageTitle = location.pathname === '/routine' ? 'Habits'
+        : location.pathname === '/schedule' ? 'Schedule'
+            : location.pathname === '/finance' ? 'Finance'
+                : location.pathname === '/analytics' ? 'Analytics'
+                    : location.pathname === '/settings' ? 'Settings'
+                        : 'Dashboard';
     // Refresh streak and tasks
     const refreshData = useCallback(() => {
         const allTasks = getStoredRoutineTasks();
@@ -371,14 +378,16 @@ const DashboardLayout = () => {
             {/* SIDEBAR (DESKTOP) */}
             <aside className="sidebar">
                 <div className="logo-area">
-                    <img src="/favicon.svg" alt="Logo" className="main-logo" onError={(e) => e.target.style.display='none'} />
-                    <h2>Progress</h2>
+                    <img src="/favicon.png" alt="" className="main-logo" />
+                    <h2><span>Progress</span><strong>Tracker</strong></h2>
                 </div>
                 <nav className="sidebar-nav">
-                    <NavLink to="/" end className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}><span className="icon"><House size={20} aria-hidden="true" /></span> Home</NavLink>
-                    <NavLink to="/routine" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}><span className="icon"><ListTodo size={20} aria-hidden="true" /></span> Routine</NavLink>
-                    <NavLink to="/finance" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}><span className="icon"><Wallet size={20} aria-hidden="true" /></span> Finance</NavLink>
-                    <NavLink to="/settings" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}><span className="icon"><SettingsIcon size={20} aria-hidden="true" /></span> Settings</NavLink>
+                    {primaryNavigation.map(({ to, label, icon: Icon, end }) => (
+                        <NavLink key={to} to={to} end={end} className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}>
+                            <span className="icon"><Icon size={20} aria-hidden="true" /></span>
+                            <span>{label}</span>
+                        </NavLink>
+                    ))}
                 </nav>
 
                 <div className="sidebar-bottom-ai">
@@ -399,8 +408,35 @@ const DashboardLayout = () => {
 
             {/* MAIN CONTENT AREA */}
             <main className="main-content">
-                {location.pathname !== '/settings' && <header className="top-header">
-                    <h1 id="pageTitle">{pageTitle}</h1>
+                <header className="top-header">
+                    <h1 className="mobile-page-title">{pageTitle}</h1>
+                    <div className="header-search-wrap">
+                        <Search size={19} aria-hidden="true" />
+                        <input
+                            type="text"
+                            value={headerSearch}
+                            onChange={event => setHeaderSearch(event.target.value)}
+                            placeholder="Search pages..."
+                            aria-label="Search navigation"
+                            aria-expanded={Boolean(headerSearch.trim())}
+                            aria-controls="header-search-results"
+                        />
+                        {headerSearch.trim() && (
+                            <div className="header-search-results" id="header-search-results">
+                                {primaryNavigation
+                                    .filter(item => item.label.toLowerCase().includes(headerSearch.trim().toLowerCase()))
+                                    .map(({ to, label, icon: Icon }) => (
+                                        <NavLink key={to} to={to} onClick={() => setHeaderSearch('')}>
+                                            <Icon size={17} aria-hidden="true" />
+                                            <span>{label}</span>
+                                        </NavLink>
+                                    ))}
+                                {!primaryNavigation.some(item => item.label.toLowerCase().includes(headerSearch.trim().toLowerCase())) && (
+                                    <span className="header-search-empty">No pages found</span>
+                                )}
+                            </div>
+                        )}
+                    </div>
                     <div className="header-right">
                         {/* IN-APP NOTIFICATION BELL WITH UNREAD BADGE */}
                         <button
@@ -418,84 +454,39 @@ const DashboardLayout = () => {
                             {hasUnreadNotifications && <span className="bell-badge-dot" />}
                         </button>
 
-                        {/* STREAK FIRE BADGE (COUNT INSIDE FLAME) */}
-                        <StreakFireBadge streak={streak} onClick={() => setShowStreakModal(true)} />
-                        
                         <button
                             className="user-avatar"
                             type="button"
-                            aria-label="Account menu"
+                            aria-label="Workspace menu"
                             aria-expanded={menuOpen}
                             onClick={() => setMenuOpen(!menuOpen)}
                         >
-                            {user?.imageUrl ? (
-                                <img src={user.imageUrl} alt="" />
-                            ) : (
-                                user?.name?.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase() || '👤'
-                            )}
+                            P
                         </button>
                         
                         {menuOpen && (
                             <div className="profile-menu">
                                 <div className="profile-menu-info">
-                                    <strong id="menuUserName">{user ? user.name : 'Guest User'}</strong>
-                                    {user?.email && <small>{user.email}</small>}
+                                    <strong id="menuUserName">Personal Workspace</strong>
                                 </div>
-                                {!user ? (
-                                    <button type="button" onClick={() => { setMenuOpen(false); navigate('/settings'); }}>Sign in or create account</button>
-                                ) : (
-                                    <>
-                                        <button type="button" onClick={() => { setMenuOpen(false); navigate('/settings'); }}>Account settings</button>
-                                        <button type="button" className="signout-btn" onClick={() => { logout(); setMenuOpen(false); }}>Sign out</button>
-                                    </>
-                                )}
+                                <button type="button" onClick={() => { setMenuOpen(false); navigate('/settings'); }}>Settings</button>
                             </div>
                         )}
                     </div>
-                </header>}
+                </header>
 
                 <div className="views-container">
                     <Outlet />
                 </div>
             </main>
 
-            {/* FLOATING BOTTOM NAV DOCK (MATCHING IMAGE 1 & 3 ELEVATED CENTER NOTCH) */}
             <nav className="bottom-nav bottom-nav-dock" aria-label="Primary navigation">
-                <div className="bottom-nav-side bottom-nav-left">
-                    <NavLink to="/" end aria-label="Home" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}>
-                        <span className="icon"><House size={20} aria-hidden="true" /></span>
-                        <span className="nav-label">Home</span>
+                {primaryNavigation.map(({ to, label, icon: Icon, end }) => (
+                    <NavLink key={to} to={to} end={end} aria-label={label} className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}>
+                        <span className="icon"><Icon size={20} aria-hidden="true" /></span>
+                        <span className="nav-label">{label}</span>
                     </NavLink>
-                    <NavLink to="/routine" aria-label="Routine" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}>
-                        <span className="icon"><ListTodo size={20} aria-hidden="true" /></span>
-                        <span className="nav-label">Routine</span>
-                    </NavLink>
-                </div>
-
-                {/* ELEVATED CENTER GEMINI AI BUTTON */}
-                <div className="bottom-nav-center-notch">
-                    <button
-                        type="button"
-                        aria-label="Ask Gemini AI"
-                        className="dock-gemini-center-btn"
-                        onClick={() => window.dispatchEvent(new CustomEvent('open-ai-assistant'))}
-                        title="Open Gemini AI Assistant"
-                    >
-                        <div className="dock-gemini-glow" />
-                        <GeminiIcon size={26} color="#ffffff" />
-                    </button>
-                </div>
-
-                <div className="bottom-nav-side bottom-nav-right">
-                    <NavLink to="/finance" aria-label="Finance" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}>
-                        <span className="icon"><Wallet size={20} aria-hidden="true" /></span>
-                        <span className="nav-label">Finance</span>
-                    </NavLink>
-                    <NavLink to="/settings" aria-label="Settings" className={({ isActive }) => `nav-tab ${isActive ? 'active' : ''}`}>
-                        <span className="icon"><SettingsIcon size={20} aria-hidden="true" /></span>
-                        <span className="nav-label">Settings</span>
-                    </NavLink>
-                </div>
+                ))}
             </nav>
 
             {/* AURA PERSONAL WORKSPACE AI ASSISTANT BOT */}

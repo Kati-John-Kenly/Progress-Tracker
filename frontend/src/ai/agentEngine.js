@@ -10,6 +10,85 @@ import {
     calculateStreakStats,
     emitWorkspaceChange,
 } from '../utils/workspaceEvents.js';
+import { formatAmount } from '../utils/numberFormat.js';
+
+// Custom Personal Gemini API Key management
+export const getCustomGeminiApiKey = () => {
+    try {
+        return localStorage.getItem('aura_custom_gemini_api_key') || '';
+    } catch {
+        return '';
+    }
+};
+
+export const setCustomGeminiApiKey = (key) => {
+    try {
+        if (key && key.trim()) {
+            localStorage.setItem('aura_custom_gemini_api_key', key.trim());
+        } else {
+            localStorage.removeItem('aura_custom_gemini_api_key');
+        }
+    } catch {}
+};
+
+export const testGeminiApiKey = async (apiKey) => {
+    const key = (apiKey || getCustomGeminiApiKey()).trim();
+    if (!key) throw new Error('Please enter a valid Gemini API Key.');
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(key)}`;
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            contents: [{ parts: [{ text: "Hello Gemini, reply with 'OK' if connected." }] }]
+        })
+    });
+
+    if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData?.error?.message || `Google API error (Status ${res.status})`);
+    }
+
+    const data = await res.json();
+    return data?.candidates?.[0]?.content?.parts?.[0]?.text || 'Connected successfully!';
+};
+
+export const callGoogleGeminiDirect = async (userMessage, apiKey) => {
+    const tasks = getStoredRoutineTasks();
+    const finances = getStoredFinances();
+    const streak = calculateStreakStats(tasks);
+    const todayStr = getRelativeDate(0);
+    const todayTasks = tasks.filter(t => t.date === todayStr);
+
+    const systemPrompt = `You are Aura, the user's personal AI agent for Progress & Productivity.
+User Workspace Context:
+- Today's date: ${todayStr}
+- Scheduled tasks for today: ${todayTasks.length} (${todayTasks.filter(t => t.completed).length} completed)
+- Active Consistency Streak: ${streak.currentStreak} days (Record: ${streak.maxStreak})
+- Logged finance records: ${finances.length} transactions.
+
+Respond concisely in clean markdown with bold highlights and bullet points. Be motivating, actionable, and focus on routines, habits, productivity, and smart financial growth.`;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            contents: [
+                { role: 'user', parts: [{ text: `${systemPrompt}\n\nUser Question: ${userMessage}` }] }
+            ]
+        })
+    });
+
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error?.message || `Gemini API error (${res.status})`);
+    }
+    const data = await res.json();
+    const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!reply) throw new Error('No response returned from Gemini API');
+    return reply;
+};
 
 // Standard finance categories matching FinanceView
 const STANDARD_CATEGORIES = [
@@ -190,7 +269,7 @@ export const isApplicationRelevant = (query) => {
  * Main AI Agent Action Processor
  * Executes real state operations and returns formatted messages with action metadata.
  */
-export const processAgentMessage = async (userMessage, context = {}) => {
+export const processAgentMessage = async (userMessage) => {
     const raw = (userMessage || '').trim();
     const lower = raw.toLowerCase();
 
@@ -212,7 +291,7 @@ export const processAgentMessage = async (userMessage, context = {}) => {
 
         const hour = new Date().getHours();
         const timeGreeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-        const userName = context?.user?.name ? context.user.name.split(' ')[0] : 'there';
+        const userName = 'there';
 
         return {
             text: `👋 **${timeGreeting}, ${userName}!**\n\nI am **Aura**, your personal AI assistant for **Progress & Productivity**.\n\n📊 **Your Quick Workspace Snapshot:**\n• **Today's Tasks:** ${todayTasks.length} scheduled (${todayTasks.filter(t => t.completed).length} completed)\n• **Consistency Streak:** ${streakInfo.currentStreak} days 🔥 (Best: ${streakInfo.maxStreak})\n\nHow can I help you right now? Try asking:\n- *"What's on my schedule today?"*\n- *"Add task: React practice at 4pm"*\n- *"Log an expense of ₹250 for Coffee"*\n- *"How much have I spent this month?"*`,
@@ -259,9 +338,6 @@ export const processAgentMessage = async (userMessage, context = {}) => {
         if (lower.includes('dark')) newTheme = 'dark';
 
         setStoredTheme(newTheme);
-        if (context?.syncData) {
-            void context.syncData({ appTheme: newTheme });
-        }
         emitWorkspaceChange({ type: 'theme', theme: newTheme });
 
         return {
@@ -319,7 +395,6 @@ export const processAgentMessage = async (userMessage, context = {}) => {
 
         const updatedTasks = [...allTasks, ...newTasks];
         setStoredRoutineTasks(updatedTasks);
-        if (context?.syncData) void context.syncData({ routineTasks: updatedTasks });
         emitWorkspaceChange({ type: 'routine', action: 'load_template', date: targetDate });
 
         return {
@@ -350,7 +425,6 @@ export const processAgentMessage = async (userMessage, context = {}) => {
         if (targetTask) {
             const updated = allTasks.map(t => t.id === targetTask.id ? { ...t, completed: true } : t);
             setStoredRoutineTasks(updated);
-            if (context?.syncData) void context.syncData({ routineTasks: updated });
             emitWorkspaceChange({ type: 'routine', action: 'toggle_task', id: targetTask.id });
 
             const streak = calculateStreakStats(updated);
@@ -373,7 +447,6 @@ export const processAgentMessage = async (userMessage, context = {}) => {
         if (targetTask) {
             const updated = allTasks.map(t => t.id === targetTask.id ? { ...t, completed: false } : t);
             setStoredRoutineTasks(updated);
-            if (context?.syncData) void context.syncData({ routineTasks: updated });
             emitWorkspaceChange({ type: 'routine', action: 'toggle_task', id: targetTask.id });
 
             return {
@@ -392,7 +465,6 @@ export const processAgentMessage = async (userMessage, context = {}) => {
         if (targetTask) {
             const updated = allTasks.filter(t => t.id !== targetTask.id);
             setStoredRoutineTasks(updated);
-            if (context?.syncData) void context.syncData({ routineTasks: updated });
             emitWorkspaceChange({ type: 'routine', action: 'delete_task', id: targetTask.id });
 
             return {
@@ -415,7 +487,6 @@ export const processAgentMessage = async (userMessage, context = {}) => {
         const deletedCount = allTasks.length - remaining.length;
 
         setStoredRoutineTasks(remaining);
-        if (context?.syncData) void context.syncData({ routineTasks: remaining });
         emitWorkspaceChange({ type: 'routine', action: 'clear_completed', count: deletedCount });
 
         return {
@@ -472,7 +543,6 @@ export const processAgentMessage = async (userMessage, context = {}) => {
 
         const updatedTasks = [...allTasks, newTask];
         setStoredRoutineTasks(updatedTasks);
-        if (context?.syncData) void context.syncData({ routineTasks: updatedTasks });
         emitWorkspaceChange({ type: 'routine', action: 'add_task', task: newTask });
 
         const timeDisplay = startTime ? (endTime ? ` from ${startTime} to ${endTime}` : ` at ${startTime}`) : '';
@@ -549,7 +619,6 @@ export const processAgentMessage = async (userMessage, context = {}) => {
 
         const updated = [...allFinances, newTransaction];
         setStoredFinances(updated);
-        if (context?.syncData) void context.syncData({ financeData: updated });
         emitWorkspaceChange({ type: 'finance', action: 'add_expense', transaction: newTransaction });
 
         // Calculate this month's expense total
@@ -597,7 +666,6 @@ export const processAgentMessage = async (userMessage, context = {}) => {
 
         const updated = [...allFinances, newTransaction];
         setStoredFinances(updated);
-        if (context?.syncData) void context.syncData({ financeData: updated });
         emitWorkspaceChange({ type: 'finance', action: 'add_income', transaction: newTransaction });
 
         return {
@@ -614,7 +682,6 @@ export const processAgentMessage = async (userMessage, context = {}) => {
             if (!currentCats.includes(catName)) {
                 const updatedCats = [...currentCats, catName];
                 setStoredFinanceCategories(updatedCats);
-                if (context?.syncData) void context.syncData({ financeCategories: updatedCats });
                 emitWorkspaceChange({ type: 'finance', action: 'add_category', category: catName });
 
                 return {
@@ -639,11 +706,10 @@ export const processAgentMessage = async (userMessage, context = {}) => {
         if (target) {
             const updated = allFinances.filter(t => t.id !== target.id);
             setStoredFinances(updated);
-            if (context?.syncData) void context.syncData({ financeData: updated });
             emitWorkspaceChange({ type: 'finance', action: 'delete_transaction', id: target.id });
 
             return {
-                text: `🗑️ Removed transaction: **${target.type.toUpperCase()} ₹${target.amount}** (${target.desc}) on ${target.date}.`,
+                text: `🗑️ Removed transaction: **${target.type.toUpperCase()} ₹${formatAmount(target.amount)}** (${target.desc}) on ${target.date}.`,
                 action: { type: 'transaction_deleted', transaction: target, path: '/finance' },
             };
         } else {
@@ -714,11 +780,11 @@ ${statusBrief}
 ### 🏛️ Real-Market Financial Strategy & Action Plan
 
 1. **🛡️ Emergency Shield (Beat Inflation • 3–6 Months Reserves)**
-   • **Target:** Accumulate ₹${(benchmarkIncome * 3).toLocaleString()} – ₹${(benchmarkIncome * 6).toLocaleString()} in liquid reserves.
+   • **Target:** Accumulate ₹${formatAmount(benchmarkIncome * 3)} – ₹${formatAmount(benchmarkIncome * 6)} in liquid reserves.
    • **Real Market Tip:** Do **not** park emergency funds in low-yield regular savings accounts (2.7%–3.0%) where ~5.5% CPI inflation erodes value. Utilize **Liquid Mutual Funds** or **Sweep-in / Flexi-FDs** yielding **6.8%–7.4% p.a.** with T+1 instant liquidity.
 
 2. **📈 Systematic Wealth Compounding (Broad-Market Equity SIP)**
-   • **Recommended Allocation:** 15%–20% of income (**₹${monthlySipRec.toLocaleString()}/month**).
+   • **Recommended Allocation:** 15%–20% of income (**₹${formatAmount(monthlySipRec)}/month**).
    • **Real Market Tip:** Focus on ultra-low-cost index funds (**Nifty 50 Index / S&P 500 ETFs**, expense ratio < 0.15%). Historically, broad-market index SIPs yield **12%–14% CAGR**, doubling invested capital approximately every 5.5 to 6 years.
 
 3. **🪙 Market Volatility & Currency Hedge (Gold Allocation)**
@@ -726,16 +792,16 @@ ${statusBrief}
    • **Real Market Tip:** Opt for **Sovereign Gold Bonds (SGBs)** or **Gold ETFs** over physical gold. SGBs provide **2.5% additional annual interest** plus tax-free capital gains on maturity, shielding your wealth against currency depreciation.
 
 4. **✂️ Discretionary Trim Multiplier**
-   ${highestSpend ? `• Your largest spending category this month is **${highestSpend[0]}** (₹${highestSpend[1].toFixed(0)}).` : `• Trimming everyday non-essential expenditures by just 15%.`}
-   • If you redirect just **₹${discretionaryTrim.toLocaleString()}/month** (a 15% trim) into a 12% CAGR equity SIP:
-     - 🚀 In **5 Years:** Compounds to **₹${futureVal5.toLocaleString()}**
-     - 💎 In **10 Years:** Compounds to **₹${futureVal10.toLocaleString()}**
+   ${highestSpend ? `• Your largest spending category this month is **${highestSpend[0]}** (₹${formatAmount(highestSpend[1])}).` : `• Trimming everyday non-essential expenditures by just 15%.`}
+   • If you redirect just **₹${formatAmount(discretionaryTrim)}/month** (a 15% trim) into a 12% CAGR equity SIP:
+     - 🚀 In **5 Years:** Compounds to **₹${formatAmount(futureVal5)}**
+     - 💎 In **10 Years:** Compounds to **₹${formatAmount(futureVal10)}**
 
 5. **⚖️ Recommended 40 / 30 / 20 / 10 Balanced Rule**
-   • **40% Housing & EMIs:** ₹${Math.round(benchmarkIncome * 0.40).toLocaleString()} max
-   • **30% Essentials & Living:** ₹${Math.round(benchmarkIncome * 0.30).toLocaleString()}
-   • **20% Wealth & Equity SIP:** ₹${Math.round(benchmarkIncome * 0.20).toLocaleString()}
-   • **10% Liquid Cushion / Giving:** ₹${Math.round(benchmarkIncome * 0.10).toLocaleString()}
+   • **40% Housing & EMIs:** ₹${formatAmount(benchmarkIncome * 0.40)} max
+   • **30% Essentials & Living:** ₹${formatAmount(benchmarkIncome * 0.30)}
+   • **20% Wealth & Equity SIP:** ₹${formatAmount(benchmarkIncome * 0.20)}
+   • **10% Liquid Cushion / Giving:** ₹${formatAmount(benchmarkIncome * 0.10)}
 
 Would you like me to take you to your **Finance Dashboard** or help you log an income or investment?`;
 
@@ -800,6 +866,22 @@ Would you like me to take you to your **Finance Dashboard** or help you log an i
             text: `💾 You can download a complete JSON backup of your workspace anytime from the **Settings** page, or I can take you there right now!`,
             action: { type: 'navigate', path: '/settings', label: 'Go to Settings' },
         };
+    }
+
+    // 19.5 Personal Gemini API Fallback (if user configured their personal key)
+    const customKey = getCustomGeminiApiKey();
+    if (customKey) {
+        try {
+            const geminiReply = await callGoogleGeminiDirect(raw, customKey);
+            if (geminiReply) {
+                return {
+                    text: `✨ **Gemini Intelligence (Personal API)**\n\n${geminiReply}`,
+                    action: null,
+                };
+            }
+        } catch (apiErr) {
+            console.warn('Personal Gemini API call failed, falling back to local engine:', apiErr);
+        }
     }
 
     // 20. FALLBACK: Clarify with supported application actions

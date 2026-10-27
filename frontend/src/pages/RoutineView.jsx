@@ -1,4 +1,4 @@
-import { useContext, useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
     Droplets,
     Dumbbell,
@@ -25,7 +25,6 @@ import {
     Lock,
     AlertTriangle
 } from 'lucide-react';
-import { AuthContext } from '../context/AuthState';
 import {
     subscribeWorkspaceChange,
     emitWorkspaceChange,
@@ -93,7 +92,6 @@ const QUICK_PRESETS = [
 ];
 
 export default function RoutineView() {
-    const { syncData } = useContext(AuthContext);
 
     // Current local today reference
     const todayStr = useMemo(() => getLocalDateString(), []);
@@ -145,7 +143,6 @@ export default function RoutineView() {
     const saveTasks = (updatedTasks) => {
         setTasks(updatedTasks);
         setStoredRoutineTasks(updatedTasks);
-        void syncData({ routineTasks: updatedTasks });
         emitWorkspaceChange({ type: 'routine' });
     };
 

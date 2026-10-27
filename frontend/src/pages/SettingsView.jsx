@@ -1,8 +1,11 @@
-import { useContext, useEffect, useState, useMemo } from 'react';
-import { SignIn, SignUp } from '@clerk/react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
+    Trash2,
+    EyeOff,
+    Eye,
+    ExternalLink,
     Moon,
-    Sun,
     Bell,
     Globe,
     Smile,
@@ -12,24 +15,21 @@ import {
     HardDrive,
     Info,
     ShieldCheck,
-    LogOut,
     Check,
     ChevronRight,
     X,
-    Cloud,
     Download,
     Upload,
-    UserRound,
-    Lock,
-    Sparkles,
-    Shield,
     Share2,
     Copy,
     MessageCircle,
-    Link2
+    Link2,
+    LoaderCircle,
+    RefreshCw,
+    Sparkles
 } from 'lucide-react';
-import { AuthContext } from '../context/AuthState';
 import { applyAppTheme, getStoredTheme, subscribeWorkspaceChange } from '../utils/workspaceEvents';
+import { canInstallProgressApp, promptInstallProgressApp } from '../utils/appInstall';
 import {
     hasSavedDeviceBiometric,
     registerDeviceBiometric,
@@ -42,14 +42,13 @@ import {
     saveLocalPasscode,
     verifyLocalPasscode
 } from '../utils/localPasscode';
+import {
+    getCustomGeminiApiKey,
+    setCustomGeminiApiKey,
+    testGeminiApiKey
+} from '../ai/agentEngine';
 
 const backupFormat = 'progress-workspace-backup';
-const clerkAuthAppearance = {
-    layout: {
-        socialButtonsPlacement: 'top'
-    }
-};
-
 // Clean iOS Toggle Switch component matching Image 1 & Image 2
 function IOSSwitch({ checked, onChange, activeColor = '#22c55e', id, ariaLabel }) {
     return (
@@ -71,7 +70,114 @@ function IOSSwitch({ checked, onChange, activeColor = '#22c55e', id, ariaLabel }
 }
 
 export default function SettingsView() {
-    const { user, logout, loading, configured, syncError, syncData } = useContext(AuthContext);
+    // AURA AI & GEMINI SETTINGS STATE
+    const [customApiKey, setCustomApiKey] = useState(() => getCustomGeminiApiKey());
+    const [inputApiKey, setInputApiKey] = useState('');
+    const [showKeyText, setShowKeyText] = useState(false);
+    const [testingKey, setTestingKey] = useState(false);
+    const [testResult, setTestResult] = useState(null);
+    const [aiStorageMode, setAiStorageMode] = useState(() => {
+        try {
+            return localStorage.getItem('aura_storage_mode') || 'local';
+        } catch {
+            return 'local';
+        }
+    });
+    const [aiFeedbackMsg, setAiFeedbackMsg] = useState('');
+
+    const handleOpenApiKeyModal = () => {
+        setInputApiKey(customApiKey);
+        setTestResult(null);
+        setShowKeyText(false);
+        setActiveModal('gemini_api');
+    };
+
+    const handleSaveApiKey = () => {
+        const trimmed = inputApiKey.trim();
+        setCustomGeminiApiKey(trimmed);
+        setCustomApiKey(trimmed);
+        setActiveModal(null);
+        setAiFeedbackMsg(trimmed ? 'Personal Gemini API key saved! Aura AI will now use your key.' : 'API key removed. Reverted to standard AI.');
+        setTimeout(() => setAiFeedbackMsg(''), 4000);
+    };
+
+    const handleRemoveApiKey = () => {
+        setCustomGeminiApiKey('');
+        setCustomApiKey('');
+        setInputApiKey('');
+        setActiveModal(null);
+        setAiFeedbackMsg('Personal Gemini API key removed. Reverted to standard AI.');
+        setTimeout(() => setAiFeedbackMsg(''), 4000);
+    };
+
+    const handleTestApiKey = async () => {
+        const keyToTest = inputApiKey.trim() || customApiKey;
+        if (!keyToTest) {
+            setTestResult({ success: false, message: 'Please enter a Gemini API Key to test.' });
+            return;
+        }
+        setTestingKey(true);
+        setTestResult(null);
+        try {
+            const reply = await testGeminiApiKey(keyToTest);
+            setTestResult({ success: true, message: `Connected to Gemini! AI Response: "${reply.slice(0, 40)}..."` });
+        } catch (err) {
+            setTestResult({ success: false, message: err.message || 'Connection test failed. Check key & internet.' });
+        } finally {
+            setTestingKey(false);
+        }
+    };
+
+    const handleStorageModeChange = (mode) => {
+        try {
+            localStorage.setItem('aura_storage_mode', mode);
+            setAiStorageMode(mode);
+            if (mode === 'session') {
+                const saved = localStorage.getItem('aura_conversations_v2');
+                if (saved) {
+                    sessionStorage.setItem('aura_conversations_v2', saved);
+                    localStorage.removeItem('aura_conversations_v2');
+                }
+            }
+            setAiFeedbackMsg(`AI Chat Storage set to: ${mode === 'session' ? 'Private Session Mode' : mode === 'none' ? 'Incognito (No saving)' : 'Persistent Local Storage'}`);
+            setTimeout(() => setAiFeedbackMsg(''), 4000);
+        } catch {}
+    };
+
+    const handleClearAiHistory = () => {
+        if (!window.confirm('Delete all AI conversations and clear Aura chat memory?')) return;
+        try {
+            localStorage.removeItem('aura_conversations_v2');
+            localStorage.removeItem('aura_active_conv_id_v2');
+            localStorage.removeItem('aura_chat_history_v1');
+            sessionStorage.removeItem('aura_conversations_v2');
+            sessionStorage.removeItem('aura_active_conv_id_v2');
+            sessionStorage.removeItem('aura_chat_history_v1');
+            setAiFeedbackMsg('All AI conversations and memory have been wiped.');
+            setTimeout(() => setAiFeedbackMsg(''), 4000);
+        } catch {}
+    };
+
+    const handleExportAiData = () => {
+        try {
+            const raw = localStorage.getItem('aura_conversations_v2') || sessionStorage.getItem('aura_conversations_v2') || '[]';
+            const parsed = JSON.parse(raw);
+            const blob = new Blob([JSON.stringify(parsed, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `progress-aura-ai-chats-${new Date().toISOString().slice(0, 10)}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            setAiFeedbackMsg('AI chat history exported successfully.');
+            setTimeout(() => setAiFeedbackMsg(''), 4000);
+        } catch {
+            setAiFeedbackMsg('Could not export chat history.');
+            setTimeout(() => setAiFeedbackMsg(''), 4000);
+        }
+    };
 
     // General options (Image 1 & 2)
     const [theme, setTheme] = useState(() => getStoredTheme());
@@ -91,18 +197,23 @@ export default function SettingsView() {
     // Storage calculation (Image 1)
     const [storageInfo, setStorageInfo] = useState({ percent: 12, usedText: '620KB', quotaText: '5.0MB' });
 
-    // Modals state: null | 'language' | 'passcode' | 'devices' | 'about' | 'privacy' | 'auth'
+    // Modals state: null | 'language' | 'passcode' | 'devices' | 'about' | 'privacy'
     const [activeModal, setActiveModal] = useState(null);
     const [shareStatus, setShareStatus] = useState('');
     const [currentPin, setCurrentPin] = useState('');
     const [tempPin, setTempPin] = useState('');
     const [confirmPin, setConfirmPin] = useState('');
-    const [authMode, setAuthMode] = useState('sign-in');
-
     // Backup state
     const [backupFile, setBackupFile] = useState(null);
     const [backupMessage, setBackupMessage] = useState('');
     const [backupError, setBackupError] = useState(false);
+    const [installPromptAvailable, setInstallPromptAvailable] = useState(canInstallProgressApp);
+    const [installMessage, setInstallMessage] = useState('');
+    const [isCheckingForUpdate, setIsCheckingForUpdate] = useState(false);
+    const [updateMessage, setUpdateMessage] = useState('');
+    const [isAppInstalled, setIsAppInstalled] = useState(() => (
+        window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
+    ));
 
     // Listen for theme changes across the workspace
     useEffect(() => {
@@ -112,6 +223,21 @@ export default function SettingsView() {
             }
         });
         return unsubscribe;
+    }, []);
+
+    useEffect(() => {
+        const handleInstallAvailable = () => setInstallPromptAvailable(canInstallProgressApp());
+        const handleInstalled = () => {
+            setInstallPromptAvailable(false);
+            setIsAppInstalled(true);
+            setInstallMessage('Progress has been installed on this device.');
+        };
+        window.addEventListener('progressappinstallavailable', handleInstallAvailable);
+        window.addEventListener('appinstalled', handleInstalled);
+        return () => {
+            window.removeEventListener('progressappinstallavailable', handleInstallAvailable);
+            window.removeEventListener('appinstalled', handleInstalled);
+        };
     }, []);
 
     // Calculate real localStorage usage
@@ -143,7 +269,106 @@ export default function SettingsView() {
         const next = isLight ? 'light' : 'dark';
         applyAppTheme(next);
         setTheme(next);
-        void syncData({ appTheme: next });
+    };
+
+    const handleInstallApp = async () => {
+        setInstallMessage('');
+        try {
+            const installChoice = await promptInstallProgressApp();
+            if (installChoice) {
+                setInstallPromptAvailable(false);
+                setIsAppInstalled(installChoice.outcome === 'accepted');
+                setInstallMessage(installChoice.outcome === 'accepted'
+                    ? 'Progress is being installed on this device.'
+                    : 'Installation was cancelled.');
+                return;
+            }
+
+            const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent)
+                || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+            setInstallMessage(isAppInstalled
+                ? 'Progress is already installed on this device.'
+                : isIOS
+                    ? 'To install, tap Share in Safari, then choose Add to Home Screen.'
+                    : 'Open your browser menu and choose Install app or Add to Home Screen.');
+        } catch (error) {
+            console.error('Progress app installation failed:', error);
+            setInstallMessage(error.message || 'Could not start installation. Please try again.');
+        }
+    };
+
+    const handleDownloadUpdate = async () => {
+        if (!('serviceWorker' in navigator)) {
+            setUpdateMessage('This browser cannot install app updates. Reload the page to get the latest version.');
+            return;
+        }
+
+        setIsCheckingForUpdate(true);
+        setUpdateMessage('Checking for updates…');
+        try {
+            const registration = await navigator.serviceWorker.getRegistration('/');
+            if (!registration) {
+                setUpdateMessage('Update support is not ready yet. Reload the page and try again.');
+                return;
+            }
+
+            await registration.update();
+            let waitingWorker = registration.waiting;
+
+            if (!waitingWorker && registration.installing) {
+                const installingWorker = registration.installing;
+                await new Promise((resolve, reject) => {
+                    const timeout = window.setTimeout(
+                        () => reject(new Error('The update check timed out. Try again when you have a stable connection.')),
+                        20000,
+                    );
+                    const finish = (hasUpdate) => {
+                        window.clearTimeout(timeout);
+                        resolve(hasUpdate);
+                    };
+                    const handleStateChange = () => {
+                        if (installingWorker.state === 'installed' || installingWorker.state === 'redundant') {
+                            finish(installingWorker.state === 'installed');
+                        }
+                    };
+                    installingWorker.addEventListener('statechange', handleStateChange);
+                    handleStateChange();
+                });
+                waitingWorker = registration.waiting;
+            }
+
+            if (!waitingWorker) {
+                setUpdateMessage('You are using the latest version.');
+                return;
+            }
+
+            setUpdateMessage('Downloading and applying the update…');
+            const activated = new Promise((resolve, reject) => {
+                const timeout = window.setTimeout(
+                    () => reject(new Error('The update could not be activated. Please reload and try again.')),
+                    20000,
+                );
+                const handleStateChange = () => {
+                    if (waitingWorker.state === 'activated') {
+                        window.clearTimeout(timeout);
+                        resolve();
+                    } else if (waitingWorker.state === 'redundant') {
+                        window.clearTimeout(timeout);
+                        reject(new Error('The update was interrupted. Please try again.'));
+                    }
+                };
+                waitingWorker.addEventListener('statechange', handleStateChange);
+                handleStateChange();
+            });
+            waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+            await activated;
+            window.location.reload();
+        } catch (error) {
+            console.error('Progress update check failed:', error);
+            setUpdateMessage(error.message || 'Could not check for updates. Please try again.');
+        } finally {
+            setIsCheckingForUpdate(false);
+        }
     };
 
     const toggleNotifications = (val) => {
@@ -167,7 +392,7 @@ export default function SettingsView() {
             return;
         }
         try {
-            await registerDeviceBiometric(user?.email || user?.name || 'Progress user');
+            await registerDeviceBiometric('Progress user');
             localStorage.setItem('appFaceId', 'true');
             setFaceId(true);
             setSecurityMessage('Biometric unlock is enabled. Your device will use Face ID, fingerprint, or its supported screen lock.');
@@ -327,14 +552,6 @@ export default function SettingsView() {
             localStorage.setItem('financeData', JSON.stringify(data.financeData));
             localStorage.setItem('financeCategories', JSON.stringify(data.financeCategories));
             localStorage.setItem('appTheme', data.appTheme);
-            if (user) {
-                await syncData({
-                    routineTasks: data.hybridRoutineTasks,
-                    financeData: data.financeData,
-                    financeCategories: data.financeCategories,
-                    appTheme: data.appTheme,
-                });
-            }
             window.location.reload();
         } catch (error) {
             setBackupError(true);
@@ -342,21 +559,8 @@ export default function SettingsView() {
         }
     };
 
-    // User details & initials
-    const initials = user?.name
-        ? user.name
-              .trim()
-              .split(/\s+/)
-              .slice(0, 2)
-              .map((part) => part[0])
-              .join('')
-              .toUpperCase()
-        : 'U';
-
-    const displayName = user?.name || 'Workspace User';
-    const displayEmail = user?.email || 'Local Offline Account';
-
     return (
+        <>
         <div className="view-section active">
             <div className="ios-settings-page">
                 {/* SETTINGS LARGE TITLE (IMAGE 1 STYLE) */}
@@ -367,50 +571,12 @@ export default function SettingsView() {
                 {/* USER PROFILE CARD (IMAGE 1 TEMPLATE) */}
                 <section className="ios-card ios-profile-card">
                     <div className="ios-profile-content">
-                        {user?.imageUrl ? (
-                            <img
-                                src={user.imageUrl}
-                                alt={displayName}
-                                className="ios-profile-avatar-img"
-                            />
-                        ) : (
-                            <div className="ios-profile-avatar-initials">
-                                {initials}
-                            </div>
-                        )}
+                        <div className="ios-profile-avatar-initials">P</div>
                         <div className="ios-profile-text">
-                            <h2 className="ios-profile-name">{displayName}</h2>
-                            <p className="ios-profile-email">{displayEmail}</p>
+                            <h2 className="ios-profile-name">Personal Workspace</h2>
+                            <p className="ios-profile-email">Your data stays on this device</p>
                         </div>
                     </div>
-
-                    <div className="ios-profile-actions">
-                        {user ? (
-                            <div className="ios-profile-sync-row">
-                                <span className="ios-status-badge">
-                                    <Check size={13} strokeWidth={2.5} /> Connected to Cloud
-                                </span>
-                                <button
-                                    type="button"
-                                    onClick={syncData}
-                                    className="ios-sync-btn"
-                                    title="Synchronize records with cloud"
-                                >
-                                    <Cloud size={14} /> Sync
-                                </button>
-                            </div>
-                        ) : (
-                            <button
-                                type="button"
-                                onClick={() => setActiveModal('auth')}
-                                className="ios-connect-btn"
-                            >
-                                <Cloud size={14} /> Connect Clerk Account
-                            </button>
-                        )}
-                    </div>
-
-                    {syncError && <p className="ios-sync-error">{syncError}</p>}
                 </section>
 
                 {/* SECTION 1: GENERAL (IMAGE 2 OPTIONS INSIDE IMAGE 1 CARD) */}
@@ -657,7 +823,176 @@ export default function SettingsView() {
                     )}
                 </section>
 
-                {/* SECTION 4: ABOUT, PRIVACY & LOGOUT (IMAGE 1 TEMPLATE) */}
+                <div className="ios-section-label">App &amp; Updates</div>
+                <section className="ios-card ios-app-updates-card">
+                    <p className="ios-app-updates-description">
+                        Install Progress on your phone and keep the latest version.
+                    </p>
+                    <div className="ios-app-update-actions">
+                        <button
+                            type="button"
+                            onClick={handleInstallApp}
+                            className="ios-app-update-btn"
+                            disabled={isAppInstalled}
+                        >
+                            <Download size={17} />
+                            {isAppInstalled ? 'Installed' : installPromptAvailable ? 'Install app' : 'Install on device'}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleDownloadUpdate}
+                            className="ios-app-update-btn is-primary"
+                            disabled={isCheckingForUpdate}
+                        >
+                            {isCheckingForUpdate
+                                ? <LoaderCircle size={17} className="ios-app-update-spinner" />
+                                : <RefreshCw size={17} />}
+                            {isCheckingForUpdate ? 'Checking…' : 'Download new update'}
+                        </button>
+                    </div>
+                    {installMessage && <p className="ios-app-update-message" role="status">{installMessage}</p>}
+                    {updateMessage && <p className="ios-app-update-message" role="status">{updateMessage}</p>}
+                </section>
+
+
+                {/* SECTION: AURA AI & PRIVACY */}
+                <div className="ios-section-label" id="ai-settings">Aura AI &amp; Privacy (Gemini)</div>
+                <section className="ios-card ios-card-grouped">
+                    {/* GEMINI ENGINE & API KEY ROW */}
+                    <div className="ios-row">
+                        <div className="ios-row-left">
+                            <span className="ios-icon-box" style={{ background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2))', color: '#a855f7' }}>
+                                <Sparkles size={18} />
+                            </span>
+                            <div className="ios-row-text">
+                                <span className="ios-row-title">Gemini API Key</span>
+                                <span className="ios-row-subtitle">
+                                    {customApiKey ? (
+                                        <span style={{ color: 'var(--success, #10b981)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                            <Check size={12} /> Personal Key Active (••••{customApiKey.slice(-4)})
+                                        </span>
+                                    ) : (
+                                        'Standard Workspace AI (Default)'
+                                    )}
+                                </span>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={handleOpenApiKeyModal}
+                            className="ios-badge-btn"
+                            style={{
+                                background: 'rgba(59, 130, 246, 0.14)',
+                                color: 'var(--primary, #3b82f6)',
+                                border: '1px solid rgba(59, 130, 246, 0.3)',
+                                borderRadius: 8,
+                                padding: '6px 12px',
+                                fontSize: '0.82rem',
+                                fontWeight: 600,
+                                cursor: 'pointer'
+                            }}
+                        >
+                            {customApiKey ? 'Manage Key' : 'Connect Personal Key'}
+                        </button>
+                    </div>
+
+                    <div className="ios-divider" />
+
+                    {/* DATA PRIVACY & STORAGE MODE ROW */}
+                    <div className="ios-row">
+                        <div className="ios-row-left">
+                            <span className="ios-icon-box" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981' }}>
+                                <ShieldCheck size={18} />
+                            </span>
+                            <div className="ios-row-text">
+                                <span className="ios-row-title">Chat Storage Privacy</span>
+                                <span className="ios-row-subtitle">
+                                    {aiStorageMode === 'session' ? 'Private Session (Cleared on exit)' : aiStorageMode === 'none' ? 'Incognito (Never stored)' : 'Local Storage (Saved on device)'}
+                                </span>
+                            </div>
+                        </div>
+                        <select
+                            value={aiStorageMode}
+                            onChange={(e) => handleStorageModeChange(e.target.value)}
+                            className="ios-select-dropdown"
+                            style={{
+                                background: 'var(--bg-card)',
+                                border: '1px solid var(--border)',
+                                color: 'var(--text-main)',
+                                borderRadius: 8,
+                                padding: '6px 10px',
+                                fontSize: '0.82rem',
+                                fontWeight: 500,
+                                cursor: 'pointer'
+                            }}
+                        >
+                            <option value="local">Local Storage (Saved)</option>
+                            <option value="session">Private Session Mode</option>
+                            <option value="none">Incognito (No saving)</option>
+                        </select>
+                    </div>
+
+                    <div className="ios-divider" />
+
+                    {/* EXPORT AI CHAT DATA */}
+                    <button
+                        type="button"
+                        onClick={handleExportAiData}
+                        className="ios-row ios-row-btn"
+                    >
+                        <div className="ios-row-left">
+                            <span className="ios-icon-box" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6' }}>
+                                <Download size={18} />
+                            </span>
+                            <div className="ios-row-text">
+                                <span className="ios-row-title">Export AI Conversations</span>
+                                <span className="ios-row-subtitle">Download chats in JSON format</span>
+                            </div>
+                        </div>
+                        <div className="ios-row-right">
+                            <ChevronRight size={17} className="ios-chevron" />
+                        </div>
+                    </button>
+
+                    <div className="ios-divider" />
+
+                    {/* CLEAR AI MEMORY & HISTORY */}
+                    <button
+                        type="button"
+                        onClick={handleClearAiHistory}
+                        className="ios-row ios-row-btn"
+                    >
+                        <div className="ios-row-left">
+                            <span className="ios-icon-box" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' }}>
+                                <Trash2 size={18} />
+                            </span>
+                            <div className="ios-row-text">
+                                <span className="ios-row-title" style={{ color: 'var(--danger, #ef4444)' }}>Clear AI Memory &amp; Chat History</span>
+                                <span className="ios-row-subtitle">Wipe all stored conversations and reset Aura memory</span>
+                            </div>
+                        </div>
+                        <div className="ios-row-right">
+                            <ChevronRight size={17} className="ios-chevron" />
+                        </div>
+                    </button>
+                </section>
+                {aiFeedbackMsg && (
+                    <div style={{
+                        padding: '10px 14px',
+                        margin: '-4px 0 16px',
+                        borderRadius: 10,
+                        background: 'rgba(59, 130, 246, 0.12)',
+                        border: '1px solid rgba(59, 130, 246, 0.3)',
+                        color: '#60a5fa',
+                        fontSize: '0.84rem',
+                        fontWeight: 500
+                    }}>
+                        {aiFeedbackMsg}
+                    </div>
+                )}
+
+                {/* SECTION 4: ABOUT, PRIVACY & SHARING */}
+
                 <section className="ios-card ios-card-grouped">
                     {/* About row (Image 1 style) */}
                     <button
@@ -723,58 +1058,164 @@ export default function SettingsView() {
                         </div>
                     </button>
 
-                    <div className="ios-divider" />
-
-                    {/* Logout row (Image 1 style - Red color) */}
-                    {user ? (
-                        <button
-                            type="button"
-                            onClick={() => {
-                                if (window.confirm('Sign out of your Progress workspace?')) {
-                                    logout();
-                                }
-                            }}
-                            className="ios-row ios-row-btn ios-logout-row"
-                        >
-                            <div className="ios-row-left">
-                                <span className="ios-icon-box logout-icon">
-                                    <LogOut size={18} />
-                                </span>
-                                <div className="ios-row-text">
-                                    <span className="ios-row-title logout-text">Logout</span>
-                                </div>
-                            </div>
-                            <div className="ios-row-right">
-                                <ChevronRight size={17} className="ios-chevron logout-chevron" />
-                            </div>
-                        </button>
-                    ) : (
-                        <button
-                            type="button"
-                            onClick={() => setActiveModal('auth')}
-                            className="ios-row ios-row-btn"
-                        >
-                            <div className="ios-row-left">
-                                <span className="ios-icon-box info-icon">
-                                    <UserRound size={18} />
-                                </span>
-                                <div className="ios-row-text">
-                                    <span className="ios-row-title">Sign in to Progress</span>
-                                </div>
-                            </div>
-                            <div className="ios-row-right">
-                                <ChevronRight size={17} className="ios-chevron" />
-                            </div>
-                        </button>
-                    )}
                 </section>
 
                 <footer className="ios-settings-footer">
                     <span>Progress App • Personal AI Productivity</span>
                 </footer>
             </div>
+        </div>
+
+        {activeModal && createPortal(
+            <>
+
+            {/* MODAL: PERSONAL GEMINI API KEY */}
+            {activeModal === 'gemini_api' && (
+                <div className="ios-modal-overlay" onClick={() => setActiveModal(null)}>
+                    <div className="ios-modal-box" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+                        <div className="ios-modal-header">
+                            <h3>Personal Google Gemini API Key</h3>
+                            <button type="button" onClick={() => setActiveModal(null)} className="ios-modal-close">
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <div className="ios-modal-body" style={{ padding: '16px 20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                            <p style={{ fontSize: '0.86rem', color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
+                                Keep your conversations 100% private and unlock unlimited direct intelligence by linking your personal Google Gemini API key.
+                            </p>
+
+                            <a
+                                href="https://aistudio.google.com/app/apikey"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    color: 'var(--primary, #3b82f6)',
+                                    fontSize: '0.84rem',
+                                    fontWeight: 600,
+                                    textDecoration: 'none'
+                                }}
+                            >
+                                <span>Get free key from Google AI Studio</span>
+                                <ExternalLink size={13} />
+                            </a>
+
+                            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                                <input
+                                    type={showKeyText ? 'text' : 'password'}
+                                    placeholder="AIzaSy..."
+                                    value={inputApiKey}
+                                    onChange={(e) => setInputApiKey(e.target.value)}
+                                    style={{
+                                        width: '100%',
+                                        padding: '10px 42px 10px 12px',
+                                        borderRadius: 10,
+                                        border: '1px solid var(--border)',
+                                        background: 'var(--bg-dark)',
+                                        color: 'var(--text-main)',
+                                        fontSize: '0.88rem',
+                                        fontFamily: 'monospace'
+                                    }}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowKeyText(prev => !prev)}
+                                    style={{
+                                        position: 'absolute',
+                                        right: 10,
+                                        background: 'transparent',
+                                        border: 'none',
+                                        color: 'var(--text-muted)',
+                                        cursor: 'pointer',
+                                        display: 'grid',
+                                        placeItems: 'center'
+                                    }}
+                                    title={showKeyText ? 'Hide key' : 'Show key'}
+                                >
+                                    {showKeyText ? <EyeOff size={16} /> : <Eye size={16} />}
+                                </button>
+                            </div>
+
+                            {testResult && (
+                                <div style={{
+                                    padding: '9px 12px',
+                                    borderRadius: 8,
+                                    fontSize: '0.82rem',
+                                    lineHeight: 1.4,
+                                    background: testResult.success ? 'rgba(16, 185, 129, 0.14)' : 'rgba(239, 68, 68, 0.14)',
+                                    border: `1px solid ${testResult.success ? 'rgba(16, 185, 129, 0.35)' : 'rgba(239, 68, 68, 0.35)'}`,
+                                    color: testResult.success ? '#10b981' : '#ef4444'
+                                }}>
+                                    {testResult.message}
+                                </div>
+                            )}
+
+                            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                                <button
+                                    type="button"
+                                    onClick={handleTestApiKey}
+                                    disabled={testingKey}
+                                    style={{
+                                        flex: 1,
+                                        padding: '10px 14px',
+                                        borderRadius: 10,
+                                        border: '1px solid var(--border)',
+                                        background: 'rgba(255, 255, 255, 0.05)',
+                                        color: 'var(--text-main)',
+                                        fontSize: '0.86rem',
+                                        fontWeight: 600,
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    {testingKey ? 'Testing Connection...' : 'Test Connection'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleSaveApiKey}
+                                    style={{
+                                        flex: 1,
+                                        padding: '10px 14px',
+                                        borderRadius: 10,
+                                        border: 'none',
+                                        background: 'var(--primary, #3b82f6)',
+                                        color: '#ffffff',
+                                        fontSize: '0.86rem',
+                                        fontWeight: 600,
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    Save Key
+                                </button>
+                            </div>
+
+                            {customApiKey && (
+                                <button
+                                    type="button"
+                                    onClick={handleRemoveApiKey}
+                                    style={{
+                                        padding: '8px 12px',
+                                        borderRadius: 8,
+                                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                                        background: 'transparent',
+                                        color: 'var(--danger, #ef4444)',
+                                        fontSize: '0.8rem',
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        marginTop: 4
+                                    }}
+                                >
+                                    Remove Custom Key
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* MODAL: LANGUAGE SELECTOR */}
+
             {activeModal === 'language' && (
                 <div className="ios-modal-overlay" onClick={() => setActiveModal(null)}>
                     <div className="ios-modal-box" onClick={(e) => e.stopPropagation()}>
@@ -909,7 +1350,7 @@ export default function SettingsView() {
                             </div>
                         </div>
                         <p className="ios-modal-desc" style={{ marginTop: '12px' }}>
-                            Your progress routine, habits, and finance transactions are kept in local storage and synced when signed into Clerk.
+                            Your routines, habits, and finance transactions are stored locally on this device.
                         </p>
                     </div>
                 </div>
@@ -927,7 +1368,7 @@ export default function SettingsView() {
                         </div>
                         <div className="ios-about-body">
                             <div className="ios-about-logo">
-                                <Sparkles size={32} color="#3b82f6" />
+                                <img src="/pwa-icon.png" alt="Progress target logo" />
                             </div>
                             <h4>Progress Tracker & Habit Engine</h4>
                             <span className="ios-about-version">Version 2.4.0 (Build 2026.10)</span>
@@ -936,7 +1377,7 @@ export default function SettingsView() {
                             </p>
                             <div className="ios-about-credits">
                                 <div><strong>Framework:</strong> React 19 + Vite</div>
-                                <div><strong>Cloud Sync:</strong> Clerk Authentication + Supabase</div>
+                                <div><strong>Storage:</strong> Private local workspace on this device</div>
                                 <div><strong>AI Engine:</strong> Google Gemini 2.5 Flash</div>
                             </div>
                         </div>
@@ -964,8 +1405,8 @@ export default function SettingsView() {
                                 <p>Progress does not track your personal activities across other websites or sell your behavioral data.</p>
                             </div>
                             <div className="ios-privacy-item">
-                                <strong>3. Secure Cloud Backup</strong>
-                                <p>When signed in with Clerk, your records are transmitted encrypted to your isolated workspace database.</p>
+                                <strong>3. Backups Are Under Your Control</strong>
+                                <p>Export a backup from Settings to keep a copy or move your data to another device.</p>
                             </div>
                         </div>
                     </div>
@@ -1040,42 +1481,9 @@ export default function SettingsView() {
                 </div>
             )}
 
-            {/* MODAL: CLERK AUTH */}
-            {activeModal === 'auth' && (
-                <div className="ios-modal-overlay" onClick={() => setActiveModal(null)}>
-                    <div className="ios-modal-box ios-modal-auth" onClick={(e) => e.stopPropagation()}>
-                        <div className="ios-modal-header">
-                            <h3>{authMode === 'sign-in' ? 'Sign In to Progress' : 'Create an Account'}</h3>
-                            <button type="button" onClick={() => setActiveModal(null)} className="ios-modal-close">
-                                <X size={18} />
-                            </button>
-                        </div>
-                        <div className="ios-auth-segmented">
-                            <button
-                                type="button"
-                                className={authMode === 'sign-in' ? 'active' : ''}
-                                onClick={() => setAuthMode('sign-in')}
-                            >
-                                Sign In
-                            </button>
-                            <button
-                                type="button"
-                                className={authMode === 'sign-up' ? 'active' : ''}
-                                onClick={() => setAuthMode('sign-up')}
-                            >
-                                Create Account
-                            </button>
-                        </div>
-                        <div className="ios-clerk-container">
-                            {authMode === 'sign-in' ? (
-                                <SignIn appearance={clerkAuthAppearance} routing="virtual" />
-                            ) : (
-                                <SignUp appearance={clerkAuthAppearance} routing="virtual" />
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
+            </>,
+            document.body,
+        )}
+        </>
     );
 }

@@ -16,9 +16,9 @@ export default function GeminiIcon({ size = 20, className = '', color }) {
         >
             <defs>
                 <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#4e8cff" />
-                    <stop offset="45%" stopColor="#9b72cb" />
-                    <stop offset="90%" stopColor="#f43f5e" />
+                    <stop offset="0%" stopColor="var(--gemini-sparkle-1, #4e8cff)" />
+                    <stop offset="45%" stopColor="var(--gemini-sparkle-2, #9b72cb)" />
+                    <stop offset="90%" stopColor="var(--gemini-sparkle-3, #f43f5e)" />
                 </linearGradient>
             </defs>
             <path

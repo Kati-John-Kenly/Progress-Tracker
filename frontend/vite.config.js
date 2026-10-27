@@ -15,8 +15,8 @@ function serviceWorkerPlugin() {
         '/',
         '/index.html',
         '/manifest.webmanifest',
-        '/pwa-icon.svg',
-        '/favicon.svg',
+        '/pwa-icon.png',
+        '/favicon.png',
         ...Object.keys(bundle)
           .filter((fileName) => fileName !== 'sw.js')
           .map((fileName) => `/${fileName}`),

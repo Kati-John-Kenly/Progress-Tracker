@@ -1,4 +1,4 @@
-import { useContext, useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import {
@@ -11,6 +11,8 @@ import {
     Plus,
     X,
     Trash2,
+    Upload,
+    Search,
     Utensils,
     Zap,
     Coffee,
@@ -19,10 +21,7 @@ import {
     ShoppingBag,
     Briefcase,
     Sparkles,
-    Check,
-    PieChart
 } from 'lucide-react';
-import { AuthContext } from '../context/AuthState';
 import {
     subscribeWorkspaceChange,
     emitWorkspaceChange,
@@ -31,6 +30,10 @@ import {
     getStoredFinanceCategories,
     setStoredFinanceCategories,
 } from '../utils/workspaceEvents';
+import { getStatementTotals } from '../utils/statementImport';
+import { parseStatementFile } from '../utils/statementFileParser';
+import { formatAmount } from '../utils/numberFormat';
+import { filterFinanceTransactions } from '../utils/financeSearch';
 
 // Register ChartJS elements
 ChartJS.register(ArcElement, Tooltip, Legend);
@@ -80,18 +83,21 @@ const DEFAULT_PRESET_CATEGORIES = [
     { name: 'Investment', type: 'income', icon: TrendingUp },
 ];
 
-export default function FinanceView() {
-    const { syncData } = useContext(AuthContext);
+export default function FinanceView({ initialTab = 'transactions' }) {
 
     // Finance Data State
     const [financeData, setFinanceData] = useState(() => getStoredFinances());
     const [customCategories, setCustomCategories] = useState(() => getStoredFinanceCategories());
     const [transactionFilter, setTransactionFilter] = useState('all'); // 'all' | 'income' | 'expense' | 'estimate'
-    const [activeSubTab, setActiveSubTab] = useState('transactions'); // 'transactions' | 'charts' | 'calendar' | 'allocation'
+    const [transactionSearch, setTransactionSearch] = useState('');
+    const [activeSubTab, setActiveSubTab] = useState(initialTab); // 'transactions' | 'charts' | 'calendar' | 'allocation'
     const [showFinanceDetails, setShowFinanceDetails] = useState(false);
 
     // Add Modal State
     const [showAddModal, setShowAddModal] = useState(false);
+    const [isImportingStatement, setIsImportingStatement] = useState(false);
+    const [statementMessage, setStatementMessage] = useState(null);
+    const statementInputRef = useRef(null);
     const [expandedCalendarDay, setExpandedCalendarDay] = useState(null);
     const longPressTimerRef = useRef(null);
     const didLongPressRef = useRef(false);
@@ -138,10 +144,14 @@ export default function FinanceView() {
     // Filter transactions for viewed month
     const monthlyTransactions = useMemo(() => {
         return financeData.filter(t => {
-            const d = new Date(t.date);
+            const d = new Date(`${String(t.date || '').slice(0, 10)}T00:00:00`);
             return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
         }).sort((a, b) => new Date(b.date) - new Date(a.date));
     }, [financeData, currentMonth, currentYear]);
+    const statementTransactionCount = useMemo(
+        () => financeData.filter(transaction => transaction.source === 'statement').length,
+        [financeData],
+    );
 
     // Filter by type
     const displayedTransactions = useMemo(() => {
@@ -151,24 +161,19 @@ export default function FinanceView() {
         if (transactionFilter === 'estimate') return monthlyTransactions.filter(t => t.monthlyEstimate);
         return monthlyTransactions;
     }, [monthlyTransactions, transactionFilter]);
+    const searchedTransactions = useMemo(
+        () => filterFinanceTransactions(displayedTransactions, transactionSearch),
+        [displayedTransactions, transactionSearch],
+    );
 
     // Metrics calculation
-    let totalIncome = 0;
-    let totalExpense = 0;
-    const incomeTotals = {};
-    const expenseTotals = {};
+    const transactionTotals = getStatementTotals(monthlyTransactions);
+    const totalIncome = transactionTotals.income;
+    const totalExpense = transactionTotals.spending;
+    const incomeTotals = transactionTotals.incomeByCategory;
+    const expenseTotals = transactionTotals.spendingByCategory;
 
-    monthlyTransactions.forEach(t => {
-        if (t.type === 'income') {
-            totalIncome += t.amount;
-            incomeTotals[t.desc] = (incomeTotals[t.desc] || 0) + t.amount;
-        } else {
-            totalExpense += t.amount;
-            expenseTotals[t.desc] = (expenseTotals[t.desc] || 0) + t.amount;
-        }
-    });
-
-    const netSavings = totalIncome - totalExpense;
+    const netSavings = Number((totalIncome - totalExpense).toFixed(2));
     const savingsRatio = totalIncome > 0
         ? Math.max(0, Math.min(100, Math.round((netSavings / totalIncome) * 100)))
         : 0;
@@ -201,7 +206,7 @@ export default function FinanceView() {
         <section className={`finance-detail-card ${tone}`}>
             <div className="finance-detail-card-header">
                 <h4>{title}</h4>
-                <strong>₹{total}</strong>
+                <strong>₹{formatAmount(total)}</strong>
             </div>
             {total > 0 ? (
                 <div className="finance-detail-content">
@@ -223,7 +228,7 @@ export default function FinanceView() {
                                     style={{ backgroundColor: colors[index % colors.length] }}
                                 />
                                 <span className="finance-detail-label">{label}</span>
-                                <strong>₹{value}</strong>
+                                <strong>₹{formatAmount(value)}</strong>
                                 <small>{Math.round((value / total) * 100)}%</small>
                             </li>
                         ))}
@@ -270,7 +275,6 @@ export default function FinanceView() {
         setFinanceData(updatedFinance);
 
         // 3. Sync to backend / auth context if authenticated
-        void syncData({ financeData: updatedFinance, financeCategories: updatedCategories });
 
         // 4. Emit workspace event for real-time app-wide updates
         emitWorkspaceChange({ type: 'finance', action: 'add', transaction: newTransaction });
@@ -281,6 +285,83 @@ export default function FinanceView() {
         setNewCategory('');
         setIsMonthlyEstimate(false);
         setShowAddModal(false);
+    };
+
+    const handleStatementUpload = async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        setIsImportingStatement(true);
+        setStatementMessage(null);
+        try {
+            const result = await parseStatementFile(file, { customCategories });
+            const importedTransactions = result.transactions.map((transaction, index) => ({
+                ...transaction,
+                id: globalThis.crypto?.randomUUID?.() || `statement-${Date.now()}-${index}`,
+                createdAt: new Date().toISOString(),
+            }));
+            const updatedFinance = [...importedTransactions, ...financeData];
+
+            setStoredFinances(updatedFinance);
+            setFinanceData(updatedFinance);
+            emitWorkspaceChange({
+                type: 'finance',
+                action: 'statement-import',
+                count: importedTransactions.length,
+            });
+
+            const latestDate = importedTransactions
+                .map(transaction => transaction.date)
+                .sort()
+                .at(-1);
+            if (latestDate) setViewDate(new Date(`${latestDate}T00:00:00`));
+
+            const skippedDetails = Object.entries(result.skippedReasons)
+                .map(([reason, count]) => `${count} invalid ${reason}${count === 1 ? '' : 's'}`)
+                .join(', ');
+            const skippedMessage = result.skippedCount
+                ? ` ${result.skippedCount} malformed row${result.skippedCount === 1 ? ' was' : 's were'} skipped (${skippedDetails}).`
+                : '';
+            const excludedDetails = Object.entries(result.excludedReasons)
+                .map(([reason, count]) => `${count} ${reason}`)
+                .join(', ');
+            const excludedMessage = result.excludedCount
+                ? ` Excluded ${result.excludedCount} suspicious debit transaction${result.excludedCount === 1 ? '' : 's'} (${excludedDetails}).`
+                : '';
+            setStatementMessage({
+                type: 'success',
+                text: `Imported ${importedTransactions.length} transactions. ${result.failedCount} failed transaction${result.failedCount === 1 ? '' : 's'} remain visible but are excluded from totals.${excludedMessage}${skippedMessage}`,
+            });
+        } catch (error) {
+            setStatementMessage({
+                type: 'error',
+                text: error instanceof Error ? error.message : 'The statement could not be read.',
+            });
+        } finally {
+            setIsImportingStatement(false);
+            event.target.value = '';
+        }
+    };
+
+    const handleClearStatementTransactions = () => {
+        if (statementTransactionCount === 0) return;
+        const confirmed = window.confirm(
+            `Remove all ${statementTransactionCount} transactions imported from statements? Manually added transactions will be kept.`,
+        );
+        if (!confirmed) return;
+
+        const updatedFinance = financeData.filter(transaction => transaction.source !== 'statement');
+        setStoredFinances(updatedFinance);
+        setFinanceData(updatedFinance);
+        emitWorkspaceChange({
+            type: 'finance',
+            action: 'statement-clear',
+            count: statementTransactionCount,
+        });
+        setStatementMessage({
+            type: 'success',
+            text: `Cleared ${statementTransactionCount} statement-imported transaction${statementTransactionCount === 1 ? '' : 's'}. Manually added transactions were kept.`,
+        });
     };
 
     // Delete Transaction
@@ -294,7 +375,6 @@ export default function FinanceView() {
         setStoredFinances(updatedFinance);
 
         setFinanceData(updatedFinance);
-        void syncData({ financeData: updatedFinance });
         emitWorkspaceChange({ type: 'finance', action: 'delete', id });
     };
 
@@ -324,12 +404,9 @@ export default function FinanceView() {
         for (let i = 1; i <= daysInMonth; i++) {
             const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
             const dayTransactions = monthlyTransactions.filter(t => t.date === dateStr && !t.monthlyEstimate);
-            const dayIncome = dayTransactions.reduce((sum, transaction) => (
-                transaction.type === 'income' ? sum + transaction.amount : sum
-            ), 0);
-            const dayExpense = dayTransactions.reduce((sum, transaction) => (
-                transaction.type === 'expense' ? sum + transaction.amount : sum
-            ), 0);
+            const dayTotals = getStatementTotals(dayTransactions);
+            const dayIncome = dayTotals.income;
+            const dayExpense = dayTotals.spending;
             const hasActivity = dayTransactions.length > 0;
             const isToday = dateStr === new Date().toISOString().split('T')[0];
             const isExpanded = expandedCalendarDay === dateStr;
@@ -370,18 +447,19 @@ export default function FinanceView() {
                     } : undefined}
                 >
                     <span className="cal-day-num">{i}</span>
-                    {dayIncome > 0 && <span className="cal-tag income">+₹{dayIncome}</span>}
-                    {dayExpense > 0 && <span className="cal-tag expense">-₹{dayExpense}</span>}
+                    {dayIncome > 0 && <span className="cal-tag income">+₹{formatAmount(dayIncome)}</span>}
+                    {dayExpense > 0 && <span className="cal-tag expense">-₹{formatAmount(dayExpense)}</span>}
                     {hasActivity && (
                         <div className="calendar-transaction-popover">
                             <strong>{fullMonthNames[currentMonth]} {i}</strong>
                             <ul>
                                 {dayTransactions.map((transaction, index) => (
                                     <li key={transaction.id ?? `${dateStr}-${index}`}>
-                                        <span>{transaction.desc || (transaction.type === 'income' ? 'Income' : 'Expense')}</span>
+                                        <span>{transaction.name || transaction.desc || (transaction.type === 'income' ? 'Income' : 'Expense')}</span>
                                         <b className={transaction.type === 'income' ? 'income' : 'expense'}>
-                                            {transaction.type === 'income' ? '+' : '-'}₹{transaction.amount}
+                                            {transaction.type === 'income' ? '+' : '-'}₹{formatAmount(transaction.amount)}
                                         </b>
+                                        {transaction.status === 'FAILED' && <small className="finance-failed-status">Failed</small>}
                                     </li>
                                 ))}
                             </ul>
@@ -468,20 +546,20 @@ export default function FinanceView() {
                     <h3>
                         {totalIncome === 0 && totalExpense === 0
                             ? "No transactions this month"
-                            : `Income: ₹${totalIncome} • Spent: ₹${totalExpense}`}
+                            : `Income: ₹${formatAmount(totalIncome)} • Spent: ₹${formatAmount(totalExpense)}`}
                     </h3>
                     <p>
                         {totalIncome === 0 && totalExpense === 0
                             ? "Start logging your income and daily spending."
                             : netSavings >= 0
-                            ? `Great discipline! You have a positive balance of +₹${netSavings} (${savingsRatio}% saved).`
-                            : `Spending exceeds income by ₹${Math.abs(netSavings)}. Review allocations below.`}
+                            ? `Great discipline! You have a positive balance of +₹${formatAmount(netSavings)} (${savingsRatio}% saved).`
+                            : `Spending exceeds income by ₹${formatAmount(Math.abs(netSavings))}. Review allocations below.`}
                     </p>
                 </div>
 
                 <div className="routine-progress-streak-tag finance-net-tag">
                     <Wallet size={14} color="#3b82f6" />
-                    <span>{netSavings >= 0 ? '+' : ''}₹{netSavings} Net</span>
+                    <span>{netSavings >= 0 ? '+' : ''}₹{formatAmount(netSavings)} Net</span>
                 </div>
             </div>
 
@@ -515,7 +593,7 @@ export default function FinanceView() {
                         <div className="finance-detail-net">
                             <span>Net balance</span>
                             <strong className={netSavings >= 0 ? 'income' : 'expense'}>
-                                {netSavings >= 0 ? '+' : '-'}₹{Math.abs(netSavings)}
+                                {netSavings >= 0 ? '+' : '-'}₹{formatAmount(Math.abs(netSavings))}
                             </strong>
                         </div>
                     </div>
@@ -551,6 +629,35 @@ export default function FinanceView() {
             {(activeSubTab === 'transactions' || activeSubTab === 'calendar') && (
                 <>
                     <div className="routine-add-bar-wrap routine-add-bar-top">
+                        <input
+                            ref={statementInputRef}
+                            type="file"
+                            accept=".pdf,.xlsx,.xls,.csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+                            onChange={handleStatementUpload}
+                            className="finance-statement-input"
+                            aria-label="Upload a transaction statement"
+                            aria-hidden="true"
+                            tabIndex={-1}
+                        />
+                        <button
+                            type="button"
+                            onClick={() => statementInputRef.current?.click()}
+                            className="routine-add-main-btn finance-statement-upload-btn"
+                            disabled={isImportingStatement}
+                        >
+                            <Upload size={18} />
+                            <span>{isImportingStatement ? 'Processing statement…' : 'Upload a statement'}</span>
+                        </button>
+                        {statementTransactionCount > 0 && (
+                            <button
+                                type="button"
+                                onClick={handleClearStatementTransactions}
+                                className="routine-add-main-btn finance-clear-statement-btn"
+                            >
+                                <Trash2 size={18} />
+                                <span>Clear uploaded transactions ({statementTransactionCount})</span>
+                            </button>
+                        )}
                         <button
                             type="button"
                             onClick={() => setShowAddModal(true)}
@@ -560,6 +667,15 @@ export default function FinanceView() {
                             <span>Add a new transaction</span>
                         </button>
                     </div>
+                    {statementMessage && (
+                        <p
+                            className={`finance-statement-message ${statementMessage.type}`}
+                            role={statementMessage.type === 'error' ? 'alert' : 'status'}
+                            aria-live="polite"
+                        >
+                            {statementMessage.text}
+                        </p>
+                    )}
 
                     {/* DAILY CASHFLOW PAYMENT CALENDAR (ALWAYS VISIBLE IN TRANSACTIONS VIEW) */}
                     <div className="finance-calendar-panel" style={{ marginBottom: '18px' }}>
@@ -636,26 +752,63 @@ export default function FinanceView() {
                         )}
                     </div>
 
+                    <label className="finance-search-wrap">
+                        <Search size={18} aria-hidden="true" />
+                        <input
+                            type="search"
+                            value={transactionSearch}
+                            onChange={event => setTransactionSearch(event.target.value)}
+                            placeholder="Search transactions by name, category, date, or amount"
+                            aria-label="Search transactions"
+                        />
+                        {transactionSearch && (
+                            <button
+                                type="button"
+                                onClick={() => setTransactionSearch('')}
+                                className="finance-search-clear"
+                                aria-label="Clear transaction search"
+                            >
+                                <X size={16} />
+                            </button>
+                        )}
+                    </label>
+
                     {/* TRANSACTIONS CARDS LIST (ROUTINE TASK CARD DESIGN TYPE) */}
                     <div className="routine-tasks-list">
-                        {displayedTransactions.length === 0 ? (
+                        {searchedTransactions.length === 0 ? (
                             <div className="routine-empty-box">
                                 <Sparkles size={32} color="#3b82f6" />
-                                <h4>No transactions in this view</h4>
-                                <p>Record your income, groceries, rent, or dining expenses to track your balance.</p>
-                                <button
-                                    type="button"
-                                    onClick={() => setShowAddModal(true)}
-                                    className="routine-template-btn work"
-                                    style={{ margin: '12px auto 0' }}
-                                >
-                                    <Plus size={16} />
-                                    <span>Log First Transaction</span>
-                                </button>
+                                <h4>{transactionSearch ? 'No matching transactions' : 'No transactions in this view'}</h4>
+                                <p>
+                                    {transactionSearch
+                                        ? 'Try another name, category, date, amount, or transaction type.'
+                                        : 'Record your income, groceries, rent, or dining expenses to track your balance.'}
+                                </p>
+                                {transactionSearch ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setTransactionSearch('')}
+                                        className="routine-template-btn work"
+                                        style={{ margin: '12px auto 0' }}
+                                    >
+                                        <X size={16} />
+                                        <span>Clear search</span>
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowAddModal(true)}
+                                        className="routine-template-btn work"
+                                        style={{ margin: '12px auto 0' }}
+                                    >
+                                        <Plus size={16} />
+                                        <span>Log First Transaction</span>
+                                    </button>
+                                )}
                             </div>
                         ) : (
-                            displayedTransactions.map((tx) => {
-                                const meta = getFinanceCategoryMeta(tx.desc, tx.type);
+                            searchedTransactions.map((tx) => {
+                                const meta = getFinanceCategoryMeta(tx.desc || tx.name || 'Uncategorized', tx.type);
                                 const IconComponent = meta.icon;
 
                                 return (
@@ -673,11 +826,13 @@ export default function FinanceView() {
 
                                         {/* CENTER DETAILS */}
                                         <div className="routine-task-details">
-                                            <h4 className="routine-task-title">{tx.desc}</h4>
+                                            <h4 className="routine-task-title">{tx.name || tx.desc || 'Uncategorized'}</h4>
                                             <div className="routine-task-meta-row">
                                                 <span className={`routine-task-tag ${tx.type === 'income' ? 'income-tag' : 'expense-tag'}`}>
-                                                    ★ {tx.type === 'income' ? 'Income' : 'Expense'}
+                                                    ★ {tx.type === 'income' ? 'Income' : 'Spending'}
                                                 </span>
+                                                <span className="routine-task-time-text">{tx.desc || 'Uncategorized'}</span>
+                                                {tx.status === 'FAILED' && <span className="finance-failed-status">Failed · excluded from totals</span>}
                                                 <span className="routine-task-time-text">
                                                     {tx.monthlyEstimate
                                                         ? `${monthNames[new Date(tx.date).getMonth()]} · Monthly Estimate`
@@ -689,7 +844,7 @@ export default function FinanceView() {
                                         {/* RIGHT: AMOUNT BADGE & DELETE */}
                                         <div className="routine-task-right">
                                             <div className={`finance-amount-badge ${tx.type === 'income' ? 'income' : 'expense'}`}>
-                                                <span>{tx.type === 'income' ? '+' : '-'}₹{tx.amount}</span>
+                                                <span>{tx.type === 'income' ? '+' : '-'}₹{formatAmount(tx.amount)}</span>
                                             </div>
 
                                             <button
@@ -721,7 +876,7 @@ export default function FinanceView() {
                     </div>
 
                     <p className="finance-plan-desc">
-                        Based on your monthly income of <strong>₹{totalIncome}</strong>, here is your healthy allocation target:
+                        Based on your monthly income of <strong>₹{formatAmount(totalIncome)}</strong>, here is your healthy allocation target:
                     </p>
 
                     <div className="finance-allocation-grid">
@@ -730,7 +885,7 @@ export default function FinanceView() {
                                 <span className="alloc-title">EMI & Housing</span>
                                 <span className="alloc-pct">40% Target</span>
                             </div>
-                            <strong className="alloc-amt">₹{Math.round(totalIncome * 0.40)}</strong>
+                            <strong className="alloc-amt">₹{formatAmount(totalIncome * 0.40)}</strong>
                             <p className="alloc-note">Rent, home maintenance, major EMIs</p>
                         </div>
 
@@ -739,7 +894,7 @@ export default function FinanceView() {
                                 <span className="alloc-title">Living & Lifestyle</span>
                                 <span className="alloc-pct">30% Target</span>
                             </div>
-                            <strong className="alloc-amt">₹{Math.round(totalIncome * 0.30)}</strong>
+                            <strong className="alloc-amt">₹{formatAmount(totalIncome * 0.30)}</strong>
                             <p className="alloc-note">Groceries, transport, dining, shopping</p>
                         </div>
 
@@ -748,7 +903,7 @@ export default function FinanceView() {
                                 <span className="alloc-title">Savings & Growth</span>
                                 <span className="alloc-pct">20% Target</span>
                             </div>
-                            <strong className="alloc-amt">₹{Math.round(totalIncome * 0.20)}</strong>
+                            <strong className="alloc-amt">₹{formatAmount(totalIncome * 0.20)}</strong>
                             <p className="alloc-note">Emergency fund, stocks, mutual funds</p>
                         </div>
 
@@ -757,7 +912,7 @@ export default function FinanceView() {
                                 <span className="alloc-title">Giving & Personal</span>
                                 <span className="alloc-pct">10% Target</span>
                             </div>
-                            <strong className="alloc-amt">₹{Math.round(totalIncome * 0.10)}</strong>
+                            <strong className="alloc-amt">₹{formatAmount(totalIncome * 0.10)}</strong>
                             <p className="alloc-note">Charity, tithe, hobbies, gifting</p>
                         </div>
                     </div>
@@ -770,12 +925,12 @@ export default function FinanceView() {
                     <div className="finance-dual-charts-grid">
                         {/* Income Sources Chart */}
                         <div className="finance-chart-card">
-                            <h4>Income Sources (₹{totalIncome})</h4>
+                            <h4>Income Sources (₹{formatAmount(totalIncome)})</h4>
                             <div className="finance-chart-body">
                                 {Object.keys(incomeTotals).length > 0 ? (
                                     <>
                                         <div className="chart-center-val">
-                                            <strong style={{ color: '#10b981' }}>+₹{totalIncome}</strong>
+                                            <strong style={{ color: '#10b981' }}>+₹{formatAmount(totalIncome)}</strong>
                                         </div>
                                         <Doughnut
                                             data={incomeChartData}
@@ -790,12 +945,12 @@ export default function FinanceView() {
 
                         {/* Spending Habits Chart */}
                         <div className="finance-chart-card">
-                            <h4>Spending Breakdown (₹{totalExpense})</h4>
+                            <h4>Spending Breakdown (₹{formatAmount(totalExpense)})</h4>
                             <div className="finance-chart-body">
                                 {Object.keys(expenseTotals).length > 0 ? (
                                     <>
                                         <div className="chart-center-val">
-                                            <strong style={{ color: '#ef4444' }}>-₹{totalExpense}</strong>
+                                            <strong style={{ color: '#ef4444' }}>-₹{formatAmount(totalExpense)}</strong>
                                         </div>
                                         <Doughnut
                                             data={expenseChartData}

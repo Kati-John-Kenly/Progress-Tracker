@@ -1,26 +1,8 @@
-## Progress Tracker
+# Progress Tracker
 
-The Vite app uses Clerk for sign-in and connects directly to Supabase Postgres with the signed-in Clerk session token. Supabase row-level security (RLS) limits each account to its own workspace. Vercel hosts the frontend; the app does not need a Render API.
+Progress Tracker is a local-first productivity and finance app. It does not require an account or sign-in. Routines, finance records, preferences, and AI conversations are stored in the browser on the current device.
 
-## Configure Clerk and Supabase
-
-1. Create or select a Clerk application. Enable email sign-in/sign-up and the Google social connection, add your local and Vercel URLs, and activate Clerk's Supabase integration. Google appears at the top of both account forms when enabled. Shared Google credentials are for development; configure your own Google OAuth credentials for production in Clerk.
-2. In Supabase, add Clerk as a third-party auth provider using the Clerk domain. Clerk session tokens must contain the `authenticated` role claim.
-3. Run [`../supabase/schema.sql`](../supabase/schema.sql) in the Supabase SQL editor.
-4. Copy `.env.example` to `.env.local` and set `VITE_CLERK_PUBLISHABLE_KEY`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_PUBLISHABLE_KEY`.
-5. Add the same three variables to Vercel for Preview and Production. Never expose a Supabase secret/service-role key in a `VITE_` variable.
-
-## Import legacy Mongo data (optional)
-
-Mongo is no longer used at runtime. To import existing users' routines and finances, create Clerk accounts using the same verified emails as the Mongo accounts. Set `MONGO_URI`, `CLERK_SECRET_KEY`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY` in `backend/.env`, then run from the repository root:
-
-```powershell
-cd backend
-npm install
-npm run migrate:users
-```
-
-The local script imports only users with a matching verified Clerk email. It skips users who already have a Supabase workspace, so rerunning it will not overwrite newer records. Password hashes are not migrated. The service-role key is used only by the local migration script.
+Use **Settings → Storage & Data** to download a backup and restore it on another device. Keep backup files somewhere private.
 
 ## Run locally
 
@@ -30,4 +12,4 @@ npm install
 npm run dev
 ```
 
-Without Clerk and Supabase public configuration, the dashboard remains available in local-only mode and indicates that account/cloud sync is not configured.
+The app is built as a Progressive Web App. Open **Settings → App & Updates** to install it on a supported device or check for and apply updates.
