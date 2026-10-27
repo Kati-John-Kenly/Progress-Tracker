@@ -23,16 +23,19 @@ import {
     Lock,
     Pencil,
     Save,
+    LoaderCircle,
     Sparkles,
     Shield,
     Share2,
     Copy,
     MessageCircle,
     Link2,
-    GraduationCap
+    GraduationCap,
+    RefreshCw
 } from 'lucide-react';
 import { AuthContext } from '../context/AuthState';
 import { applyAppTheme, getStoredTheme, subscribeWorkspaceChange } from '../utils/workspaceEvents';
+import { canInstallProgressApp, promptInstallProgressApp } from '../utils/appInstall';
 import {
     hasSavedDeviceBiometric,
     registerDeviceBiometric,
@@ -127,6 +130,13 @@ export default function SettingsView() {
     const [backupFile, setBackupFile] = useState(null);
     const [backupMessage, setBackupMessage] = useState('');
     const [backupError, setBackupError] = useState(false);
+    const [installPromptAvailable, setInstallPromptAvailable] = useState(canInstallProgressApp);
+    const [installMessage, setInstallMessage] = useState('');
+    const [isCheckingForUpdate, setIsCheckingForUpdate] = useState(false);
+    const [updateMessage, setUpdateMessage] = useState('');
+    const [isAppInstalled, setIsAppInstalled] = useState(() => (
+        window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
+    ));
 
     // Listen for theme changes across the workspace
     useEffect(() => {
@@ -136,6 +146,21 @@ export default function SettingsView() {
             }
         });
         return unsubscribe;
+    }, []);
+
+    useEffect(() => {
+        const handleInstallAvailable = () => setInstallPromptAvailable(canInstallProgressApp());
+        const handleInstalled = () => {
+            setInstallPromptAvailable(false);
+            setIsAppInstalled(true);
+            setInstallMessage('Progress has been installed on this device.');
+        };
+        window.addEventListener('progressappinstallavailable', handleInstallAvailable);
+        window.addEventListener('appinstalled', handleInstalled);
+        return () => {
+            window.removeEventListener('progressappinstallavailable', handleInstallAvailable);
+            window.removeEventListener('appinstalled', handleInstalled);
+        };
     }, []);
 
     // Calculate real localStorage usage
@@ -168,6 +193,106 @@ export default function SettingsView() {
         applyAppTheme(next);
         setTheme(next);
         void syncData({ appTheme: next });
+    };
+
+    const handleInstallApp = async () => {
+        setInstallMessage('');
+        try {
+            const installChoice = await promptInstallProgressApp();
+            if (installChoice) {
+                setInstallPromptAvailable(false);
+                setIsAppInstalled(installChoice.outcome === 'accepted');
+                setInstallMessage(installChoice.outcome === 'accepted'
+                    ? 'Progress is being installed on this device.'
+                    : 'Installation was cancelled.');
+                return;
+            }
+
+            const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent)
+                || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+            setInstallMessage(isAppInstalled
+                ? 'Progress is already installed on this device.'
+                : isIOS
+                    ? 'To install, tap Share in Safari, then choose Add to Home Screen.'
+                    : 'Open your browser menu and choose Install app or Add to Home Screen.');
+        } catch (error) {
+            console.error('Progress app installation failed:', error);
+            setInstallMessage(error.message || 'Could not start installation. Please try again.');
+        }
+    };
+
+    const handleDownloadUpdate = async () => {
+        if (!('serviceWorker' in navigator)) {
+            setUpdateMessage('This browser cannot install app updates. Reload the page to get the latest version.');
+            return;
+        }
+
+        setIsCheckingForUpdate(true);
+        setUpdateMessage('Checking for updates…');
+        try {
+            const registration = await navigator.serviceWorker.getRegistration('/');
+            if (!registration) {
+                setUpdateMessage('Update support is not ready yet. Reload the page and try again.');
+                return;
+            }
+
+            await registration.update();
+            let waitingWorker = registration.waiting;
+
+            if (!waitingWorker && registration.installing) {
+                const installingWorker = registration.installing;
+                await new Promise((resolve, reject) => {
+                    const timeout = window.setTimeout(
+                        () => reject(new Error('The update check timed out. Try again when you have a stable connection.')),
+                        20000,
+                    );
+                    const finish = (hasUpdate) => {
+                        window.clearTimeout(timeout);
+                        resolve(hasUpdate);
+                    };
+                    const handleStateChange = () => {
+                        if (installingWorker.state === 'installed' || installingWorker.state === 'redundant') {
+                            finish(installingWorker.state === 'installed');
+                        }
+                    };
+                    installingWorker.addEventListener('statechange', handleStateChange);
+                    handleStateChange();
+                });
+                waitingWorker = registration.waiting;
+            }
+
+            if (!waitingWorker) {
+                setUpdateMessage('You are using the latest version.');
+                return;
+            }
+
+            setUpdateMessage('Downloading and applying the update…');
+            const activated = new Promise((resolve, reject) => {
+                const timeout = window.setTimeout(
+                    () => reject(new Error('The update could not be activated. Please reload and try again.')),
+                    20000,
+                );
+                const handleStateChange = () => {
+                    if (waitingWorker.state === 'activated') {
+                        window.clearTimeout(timeout);
+                        resolve();
+                    } else if (waitingWorker.state === 'redundant') {
+                        window.clearTimeout(timeout);
+                        reject(new Error('The update was interrupted. Please try again.'));
+                    }
+                };
+                waitingWorker.addEventListener('statechange', handleStateChange);
+                handleStateChange();
+            });
+            waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+            await activated;
+            window.location.reload();
+        } catch (error) {
+            console.error('Progress update check failed:', error);
+            setUpdateMessage(error.message || 'Could not check for updates. Please try again.');
+        } finally {
+            setIsCheckingForUpdate(false);
+        }
     };
 
     const toggleNotifications = (val) => {
@@ -806,6 +931,37 @@ export default function SettingsView() {
                             {backupMessage}
                         </p>
                     )}
+                </section>
+
+                <div className="ios-section-label">App & Updates</div>
+                <section className="ios-card ios-app-updates-card">
+                    <p className="ios-app-updates-description">
+                        Install Progress on your phone and keep the latest version.
+                    </p>
+                    <div className="ios-app-update-actions">
+                        <button
+                            type="button"
+                            onClick={handleInstallApp}
+                            className="ios-app-update-btn"
+                            disabled={isAppInstalled}
+                        >
+                            <Download size={17} />
+                            {isAppInstalled ? 'Installed' : installPromptAvailable ? 'Install app' : 'Install on device'}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleDownloadUpdate}
+                            className="ios-app-update-btn is-primary"
+                            disabled={isCheckingForUpdate}
+                        >
+                            {isCheckingForUpdate
+                                ? <LoaderCircle size={17} className="ios-app-update-spinner" />
+                                : <RefreshCw size={17} />}
+                            {isCheckingForUpdate ? 'Checking…' : 'Download new update'}
+                        </button>
+                    </div>
+                    {installMessage && <p className="ios-app-update-message" role="status">{installMessage}</p>}
+                    {updateMessage && <p className="ios-app-update-message" role="status">{updateMessage}</p>}
                 </section>
 
                 {/* SECTION 4: ABOUT, PRIVACY & LOGOUT (IMAGE 1 TEMPLATE) */}

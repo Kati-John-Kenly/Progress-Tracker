@@ -2169,6 +2169,94 @@ body.light-theme .ios-card {
     flex-direction: column;
 }
 
+.ios-app-updates-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.ios-app-updates-description {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.84rem;
+    line-height: 1.45;
+}
+
+.ios-app-update-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+}
+
+.ios-app-update-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-width: 0;
+    min-height: 48px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-dark);
+    color: var(--text-main);
+    font: inherit;
+    font-size: 0.84rem;
+    font-weight: 650;
+    text-align: center;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.ios-app-update-btn.is-primary {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: #fff;
+}
+
+.ios-app-update-btn:hover:not(:disabled) {
+    border-color: var(--primary);
+}
+
+.ios-app-update-btn:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+.ios-app-update-btn:disabled {
+    opacity: 0.7;
+    cursor: wait;
+}
+
+.ios-app-update-spinner {
+    animation: ios-app-update-spin 0.9s linear infinite;
+}
+
+.ios-app-update-message {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    line-height: 1.45;
+}
+
+@media (max-width: 420px) {
+    .ios-app-update-actions {
+        grid-template-columns: 1fr;
+    }
+
+    .ios-app-update-btn {
+        justify-content: flex-start;
+        padding-inline: 14px;
+        text-align: left;
+    }
+}
+
+@keyframes ios-app-update-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 .ios-row {
     display: flex;
     align-items: center;

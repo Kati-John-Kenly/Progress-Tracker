@@ -46,3 +46,7 @@ npm run dev
 ```
 
 Without Clerk and Supabase public configuration, the dashboard remains available in local-only mode and indicates that account/cloud sync is not configured.
+
+## Install and update on mobile
+
+The production site is installable as a web app on supported browsers. Open **Settings → App & Updates** and choose **Install app**; on iPhone or iPad, use Safari's **Share → Add to Home Screen** option. Choose **Download new update** to check for a newly deployed build and apply it. Updates are served by the site deployment; this button does not download a separate native app package.
