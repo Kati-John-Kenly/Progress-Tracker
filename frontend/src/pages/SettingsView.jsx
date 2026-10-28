@@ -26,9 +26,22 @@ import {
     Link2,
     LoaderCircle,
     RefreshCw,
-    Sparkles
+    Sparkles,
+    User,
+    LogIn,
+    UserPlus,
+    LogOut,
+    Camera
 } from 'lucide-react';
-import { applyAppTheme, getStoredTheme, subscribeWorkspaceChange } from '../utils/workspaceEvents';
+import {
+    applyAppTheme,
+    getStoredTheme,
+    subscribeWorkspaceChange,
+    getStoredUserProfile,
+    setStoredUserProfile,
+    getStoredAccounts,
+    saveStoredAccount
+} from '../utils/workspaceEvents';
 import { canInstallProgressApp, promptInstallProgressApp } from '../utils/appInstall';
 import {
     hasSavedDeviceBiometric,
@@ -197,7 +210,233 @@ export default function SettingsView() {
     // Storage calculation (Image 1)
     const [storageInfo, setStorageInfo] = useState({ percent: 12, usedText: '620KB', quotaText: '5.0MB' });
 
-    // Modals state: null | 'language' | 'passcode' | 'devices' | 'about' | 'privacy'
+    // User Profile & Authentication State (Image 1 place login/signup)
+    const [userProfile, setUserProfile] = useState(() => getStoredUserProfile());
+    const [savedAccounts, setSavedAccounts] = useState(() => getStoredAccounts());
+    const [authMode, setAuthMode] = useState('signup'); // 'signup' | 'login' | 'edit'
+    const [authForm, setAuthForm] = useState({
+        name: '',
+        username: '',
+        email: '',
+        password: '',
+        bio: '',
+        avatarColor: 'gradient-blue',
+        avatarPhoto: ''
+    });
+    const [showAuthPassword, setShowAuthPassword] = useState(false);
+    const [authError, setAuthError] = useState('');
+    const [authSuccessMsg, setAuthSuccessMsg] = useState('');
+
+    const AVATAR_COLOR_OPTIONS = [
+        { id: 'gradient-blue', label: 'Ocean Blue', bg: 'linear-gradient(135deg, #3b82f6, #8b5cf6)' },
+        { id: 'gradient-purple', label: 'Vibrant Purple', bg: 'linear-gradient(135deg, #a855f7, #ec4899)' },
+        { id: 'gradient-emerald', label: 'Emerald Mint', bg: 'linear-gradient(135deg, #10b981, #06b6d4)' },
+        { id: 'gradient-amber', label: 'Sunset Amber', bg: 'linear-gradient(135deg, #f59e0b, #ef4444)' },
+        { id: 'gradient-rose', label: 'Rose Pink', bg: 'linear-gradient(135deg, #f43f5e, #fb7185)' },
+        { id: 'gradient-indigo', label: 'Deep Indigo', bg: 'linear-gradient(135deg, #6366f1, #3b82f6)' }
+    ];
+
+    const getProfileGradient = (colorId) => {
+        const opt = AVATAR_COLOR_OPTIONS.find(o => o.id === colorId);
+        return opt ? opt.bg : 'linear-gradient(135deg, #3b82f6, #8b5cf6)';
+    };
+
+    const getProfileInitials = (name, username) => {
+        if (name && name.trim()) {
+            const parts = name.trim().split(/\s+/);
+            if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+            return parts[0].slice(0, 2).toUpperCase();
+        }
+        if (username && username.trim()) {
+            return username.trim().slice(0, 2).toUpperCase();
+        }
+        return 'P';
+    };
+
+    const handleOpenAuthModal = (mode = 'signup') => {
+        setAuthError('');
+        setAuthSuccessMsg('');
+        setShowAuthPassword(false);
+        setSavedAccounts(getStoredAccounts());
+        if (mode === 'edit' && userProfile) {
+            setAuthMode('edit');
+            setAuthForm({
+                name: userProfile.name || '',
+                username: userProfile.username || '',
+                email: userProfile.email || '',
+                password: userProfile.password || '',
+                bio: userProfile.bio || '',
+                avatarColor: userProfile.avatarColor || 'gradient-blue',
+                avatarPhoto: userProfile.avatarPhoto || ''
+            });
+        } else {
+            setAuthMode(mode);
+            setAuthForm({
+                name: '',
+                username: '',
+                email: '',
+                password: '',
+                bio: '',
+                avatarColor: 'gradient-blue',
+                avatarPhoto: ''
+            });
+        }
+        setActiveModal('auth_modal');
+    };
+
+    const handlePhotoUpload = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (file.size > 2 * 1024 * 1024) {
+            setAuthError('Avatar image must be smaller than 2MB.');
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+            setAuthForm(prev => ({ ...prev, avatarPhoto: reader.result }));
+            setAuthError('');
+        };
+        reader.onerror = () => setAuthError('Failed to read image file.');
+        reader.readAsDataURL(file);
+    };
+
+    const handleRemovePhoto = () => {
+        setAuthForm(prev => ({ ...prev, avatarPhoto: '' }));
+    };
+
+    const handleAuthSubmit = (e) => {
+        e.preventDefault();
+        setAuthError('');
+        setAuthSuccessMsg('');
+
+        if (authMode === 'signup') {
+            const cleanUsername = authForm.username.trim().replace(/^@+/, '');
+            const cleanName = authForm.name.trim();
+            const cleanEmail = authForm.email.trim().toLowerCase();
+            const cleanPassword = authForm.password;
+
+            if (!cleanUsername) {
+                setAuthError('Please choose a username.');
+                return;
+            }
+            if (!cleanName) {
+                setAuthError('Please enter your full name.');
+                return;
+            }
+            if (!cleanPassword || cleanPassword.length < 4) {
+                setAuthError('Password must be at least 4 characters long.');
+                return;
+            }
+
+            const accounts = getStoredAccounts();
+            const existing = accounts.find(a =>
+                (a.username && a.username.toLowerCase() === cleanUsername.toLowerCase()) ||
+                (cleanEmail && a.email && a.email.toLowerCase() === cleanEmail)
+            );
+            if (existing) {
+                setAuthError('Username or email already in use. Please log in instead or use another.');
+                return;
+            }
+
+            const newProfile = {
+                id: 'usr_' + Date.now(),
+                name: cleanName,
+                username: cleanUsername,
+                email: cleanEmail,
+                password: cleanPassword,
+                bio: authForm.bio.trim(),
+                avatarColor: authForm.avatarColor || 'gradient-blue',
+                avatarPhoto: authForm.avatarPhoto || '',
+                createdAt: new Date().toISOString()
+            };
+
+            setStoredUserProfile(newProfile);
+            setUserProfile(newProfile);
+            setAuthSuccessMsg('Account created successfully!');
+            setTimeout(() => setActiveModal(null), 800);
+
+        } else if (authMode === 'login') {
+            const loginQuery = authForm.username.trim().replace(/^@+/, '').toLowerCase();
+            const cleanPassword = authForm.password;
+
+            if (!loginQuery) {
+                setAuthError('Please enter your username or email.');
+                return;
+            }
+            if (!cleanPassword) {
+                setAuthError('Please enter your password.');
+                return;
+            }
+
+            const accounts = getStoredAccounts();
+            const match = accounts.find(a =>
+                (a.username && a.username.toLowerCase() === loginQuery) ||
+                (a.email && a.email.toLowerCase() === loginQuery)
+            );
+
+            if (!match) {
+                setAuthError('Account not found with this username/email. Tap "Sign Up" to create one!');
+                return;
+            }
+
+            if (match.password && match.password !== cleanPassword) {
+                setAuthError('Incorrect password. Please try again.');
+                return;
+            }
+
+            setStoredUserProfile(match);
+            setUserProfile(match);
+            setAuthSuccessMsg(`Welcome back, ${match.name || match.username}!`);
+            setTimeout(() => setActiveModal(null), 800);
+
+        } else if (authMode === 'edit') {
+            const cleanUsername = authForm.username.trim().replace(/^@+/, '');
+            const cleanName = authForm.name.trim();
+
+            if (!cleanUsername) {
+                setAuthError('Username cannot be empty.');
+                return;
+            }
+            if (!cleanName) {
+                setAuthError('Name cannot be empty.');
+                return;
+            }
+
+            const updatedProfile = {
+                ...(userProfile || {}),
+                name: cleanName,
+                username: cleanUsername,
+                email: authForm.email.trim().toLowerCase(),
+                password: authForm.password || userProfile?.password || '',
+                bio: authForm.bio.trim(),
+                avatarColor: authForm.avatarColor || 'gradient-blue',
+                avatarPhoto: authForm.avatarPhoto || ''
+            };
+
+            setStoredUserProfile(updatedProfile);
+            setUserProfile(updatedProfile);
+            setAuthSuccessMsg('Profile details saved!');
+            setTimeout(() => setActiveModal(null), 800);
+        }
+    };
+
+    const handleLogOut = () => {
+        if (!window.confirm('Log out from this account? You will return to Guest mode.')) return;
+        setStoredUserProfile(null);
+        setUserProfile(null);
+        setActiveModal(null);
+    };
+
+    const handleSelectSavedAccount = (acc) => {
+        setAuthForm(prev => ({
+            ...prev,
+            username: acc.username || acc.email || '',
+            password: ''
+        }));
+        setAuthError('');
+    };
+
+    // Modals state: null | 'language' | 'passcode' | 'devices' | 'about' | 'privacy' | 'auth_modal'
     const [activeModal, setActiveModal] = useState(null);
     const [shareStatus, setShareStatus] = useState('');
     const [currentPin, setCurrentPin] = useState('');
@@ -215,11 +454,15 @@ export default function SettingsView() {
         window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
     ));
 
-    // Listen for theme changes across the workspace
+    // Listen for theme and user profile changes across the workspace
     useEffect(() => {
         const unsubscribe = subscribeWorkspaceChange((e) => {
             if (e?.type === 'theme') {
                 setTheme(e.theme || getStoredTheme());
+            }
+            if (e?.type === 'user_profile') {
+                setUserProfile(e.profile || getStoredUserProfile());
+                setSavedAccounts(getStoredAccounts());
             }
         });
         return unsubscribe;
@@ -568,16 +811,77 @@ export default function SettingsView() {
                     <h1 className="ios-settings-title">Settings</h1>
                 </header>
 
-                {/* USER PROFILE CARD (IMAGE 1 TEMPLATE) */}
-                <section className="ios-card ios-profile-card">
-                    <div className="ios-profile-content">
-                        <div className="ios-profile-avatar-initials">P</div>
-                        <div className="ios-profile-text">
-                            <h2 className="ios-profile-name">Personal Workspace</h2>
-                            <p className="ios-profile-email">Your data stays on this device</p>
+                {/* USER PROFILE CARD (IMAGE 1 TEMPLATE - DYNAMIC AUTH & PROFILE) */}
+                {userProfile ? (
+                    <section
+                        className="ios-card ios-profile-card ios-profile-interactive"
+                        onClick={() => handleOpenAuthModal('edit')}
+                        role="button"
+                        tabIndex={0}
+                        aria-label="Edit Profile Details"
+                    >
+                        <div className="ios-profile-content">
+                            {userProfile.avatarPhoto ? (
+                                <img src={userProfile.avatarPhoto} alt={userProfile.name} className="ios-profile-avatar-img" />
+                            ) : (
+                                <div
+                                    className="ios-profile-avatar-initials"
+                                    style={{ background: getProfileGradient(userProfile.avatarColor) }}
+                                >
+                                    {getProfileInitials(userProfile.name, userProfile.username)}
+                                </div>
+                            )}
+                            <div className="ios-profile-text">
+                                <div className="ios-profile-title-row">
+                                    <h2 className="ios-profile-name">{userProfile.name}</h2>
+                                    <span className="ios-profile-badge">Active</span>
+                                </div>
+                                <p className="ios-profile-email">
+                                    <span className="ios-profile-username">@{userProfile.username}</span>
+                                    {userProfile.email && <span className="ios-profile-dot">•</span>}
+                                    {userProfile.email && <span>{userProfile.email}</span>}
+                                </p>
+                                {userProfile.bio && (
+                                    <p className="ios-profile-bio-preview">{userProfile.bio}</p>
+                                )}
+                            </div>
+                            <div className="ios-profile-arrow-wrap">
+                                <span className="ios-profile-edit-hint">Edit</span>
+                                <ChevronRight size={18} className="ios-profile-arrow" />
+                            </div>
                         </div>
-                    </div>
-                </section>
+                    </section>
+                ) : (
+                    <section className="ios-card ios-profile-card ios-profile-guest">
+                        <div className="ios-profile-content">
+                            <div className="ios-profile-avatar-initials guest-avatar">
+                                <User size={28} />
+                            </div>
+                            <div className="ios-profile-text">
+                                <h2 className="ios-profile-name">Personal Workspace</h2>
+                                <p className="ios-profile-email">Set up your username & profile details</p>
+                            </div>
+                        </div>
+                        <div className="ios-profile-auth-actions">
+                            <button
+                                type="button"
+                                className="ios-profile-auth-btn secondary"
+                                onClick={() => handleOpenAuthModal('login')}
+                            >
+                                <LogIn size={15} />
+                                <span>Log In</span>
+                            </button>
+                            <button
+                                type="button"
+                                className="ios-profile-auth-btn primary"
+                                onClick={() => handleOpenAuthModal('signup')}
+                            >
+                                <UserPlus size={15} />
+                                <span>Sign Up</span>
+                            </button>
+                        </div>
+                    </section>
+                )}
 
                 {/* SECTION 1: GENERAL (IMAGE 2 OPTIONS INSIDE IMAGE 1 CARD) */}
                 <div className="ios-section-label">General</div>
@@ -1477,6 +1781,323 @@ export default function SettingsView() {
                             </button>
                         </div>
                         {shareStatus && <p className="ios-share-status" role="status">{shareStatus}</p>}
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL: AUTHENTICATION & USER PROFILE (LOGIN / SIGN UP / EDIT) */}
+            {activeModal === 'auth_modal' && (
+                <div className="ios-modal-overlay" onClick={() => setActiveModal(null)}>
+                    <div
+                        className="ios-modal-box ios-auth-modal-sheet"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="auth-modal-title"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="ios-modal-header">
+                            <div className="ios-auth-header-info">
+                                <h3 id="auth-modal-title">
+                                    {authMode === 'signup' ? 'Create Account' : authMode === 'login' ? 'Log In' : 'Edit Profile'}
+                                </h3>
+                                <p className="ios-modal-desc">
+                                    {authMode === 'signup'
+                                        ? 'Set up your username, details, and personal avatar'
+                                        : authMode === 'login'
+                                        ? 'Sign in to access your customized profile'
+                                        : 'Update your account name, username, and appearance'}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setActiveModal(null)}
+                                className="ios-modal-close"
+                                aria-label="Close dialog"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        {/* TAB SELECTOR: LOGIN vs SIGN UP (hidden in edit mode) */}
+                        {authMode !== 'edit' && (
+                            <div className="ios-auth-tabs">
+                                <button
+                                    type="button"
+                                    className={`ios-auth-tab ${authMode === 'login' ? 'active' : ''}`}
+                                    onClick={() => { setAuthMode('login'); setAuthError(''); }}
+                                >
+                                    <LogIn size={15} />
+                                    <span>Log In</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`ios-auth-tab ${authMode === 'signup' ? 'active' : ''}`}
+                                    onClick={() => { setAuthMode('signup'); setAuthError(''); }}
+                                >
+                                    <UserPlus size={15} />
+                                    <span>Sign Up</span>
+                                </button>
+                            </div>
+                        )}
+
+                        {authError && (
+                            <div className="ios-auth-alert error" role="alert">
+                                {authError}
+                            </div>
+                        )}
+                        {authSuccessMsg && (
+                            <div className="ios-auth-alert success" role="status">
+                                <Check size={16} />
+                                <span>{authSuccessMsg}</span>
+                            </div>
+                        )}
+
+                        <form onSubmit={handleAuthSubmit} className="ios-auth-form">
+                            {/* SIGN UP & EDIT: FULL NAME */}
+                            {(authMode === 'signup' || authMode === 'edit') && (
+                                <div className="ios-auth-field">
+                                    <label className="ios-auth-label">Full Name</label>
+                                    <input
+                                        type="text"
+                                        className="ios-auth-input"
+                                        placeholder="e.g. John Kenly"
+                                        value={authForm.name}
+                                        onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })}
+                                        required
+                                    />
+                                </div>
+                            )}
+
+                            {/* USERNAME FIELD */}
+                            <div className="ios-auth-field">
+                                <label className="ios-auth-label">
+                                    {authMode === 'login' ? 'Username or Email' : 'Username'}
+                                </label>
+                                <div className="ios-auth-input-group">
+                                    {authMode !== 'login' && <span className="ios-auth-addon">@</span>}
+                                    <input
+                                        type="text"
+                                        className="ios-auth-input"
+                                        placeholder={authMode === 'login' ? 'Enter @username or email' : 'john_kenly'}
+                                        value={authForm.username}
+                                        onChange={(e) => setAuthForm({ ...authForm, username: e.target.value })}
+                                        required
+                                        autoCapitalize="none"
+                                        autoCorrect="off"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* EMAIL FIELD (SIGN UP & EDIT) */}
+                            {(authMode === 'signup' || authMode === 'edit') && (
+                                <div className="ios-auth-field">
+                                    <label className="ios-auth-label">Email Address (Optional)</label>
+                                    <input
+                                        type="email"
+                                        className="ios-auth-input"
+                                        placeholder="john@example.com"
+                                        value={authForm.email}
+                                        onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
+                                    />
+                                </div>
+                            )}
+
+                            {/* PASSWORD FIELD */}
+                            <div className="ios-auth-field">
+                                <label className="ios-auth-label">
+                                    {authMode === 'edit' ? 'Password (Leave blank to keep current)' : 'Password'}
+                                </label>
+                                <div className="ios-auth-input-group">
+                                    <input
+                                        type={showAuthPassword ? 'text' : 'password'}
+                                        className="ios-auth-input"
+                                        placeholder={authMode === 'edit' ? 'Enter new password (optional)' : 'Enter password'}
+                                        value={authForm.password}
+                                        onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
+                                        required={authMode !== 'edit'}
+                                    />
+                                    <button
+                                        type="button"
+                                        className="ios-auth-toggle-pwd"
+                                        onClick={() => setShowAuthPassword(!showAuthPassword)}
+                                        aria-label="Toggle password visibility"
+                                    >
+                                        {showAuthPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* AVATAR & APPEARANCE (SIGN UP & EDIT) */}
+                            {(authMode === 'signup' || authMode === 'edit') && (
+                                <div className="ios-auth-field">
+                                    <label className="ios-auth-label">Profile Avatar & Color</label>
+                                    <div className="ios-avatar-customizer">
+                                        {/* Live Avatar Preview */}
+                                        <div className="ios-avatar-preview-box">
+                                            {authForm.avatarPhoto ? (
+                                                <img
+                                                    src={authForm.avatarPhoto}
+                                                    alt="Avatar Preview"
+                                                    className="ios-avatar-preview-img"
+                                                />
+                                            ) : (
+                                                <div
+                                                    className="ios-avatar-preview-initials"
+                                                    style={{ background: getProfileGradient(authForm.avatarColor) }}
+                                                >
+                                                    {getProfileInitials(authForm.name, authForm.username)}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Color Palette Swatches */}
+                                        <div className="ios-avatar-swatches-wrap">
+                                            <span className="ios-swatches-title">Color Theme</span>
+                                            <div className="ios-color-swatches" role="radiogroup">
+                                                {AVATAR_COLOR_OPTIONS.map((opt) => (
+                                                    <button
+                                                        key={opt.id}
+                                                        type="button"
+                                                        className={`ios-swatch-circle ${authForm.avatarColor === opt.id ? 'active' : ''}`}
+                                                        style={{ background: opt.bg }}
+                                                        title={opt.label}
+                                                        onClick={() => setAuthForm({ ...authForm, avatarColor: opt.id })}
+                                                    >
+                                                        {authForm.avatarColor === opt.id && <Check size={14} color="#fff" />}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Photo Upload Option */}
+                                    <div className="ios-photo-upload-row">
+                                        <label className="ios-photo-upload-btn">
+                                            <Camera size={15} />
+                                            <span>{authForm.avatarPhoto ? 'Change Photo' : 'Upload Photo'}</span>
+                                            <input
+                                                type="file"
+                                                accept="image/*"
+                                                onChange={handlePhotoUpload}
+                                                style={{ display: 'none' }}
+                                            />
+                                        </label>
+                                        {authForm.avatarPhoto && (
+                                            <button
+                                                type="button"
+                                                className="ios-photo-remove-btn"
+                                                onClick={handleRemovePhoto}
+                                            >
+                                                <Trash2 size={14} />
+                                                <span>Remove Photo</span>
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* BIO (SIGN UP & EDIT) */}
+                            {(authMode === 'signup' || authMode === 'edit') && (
+                                <div className="ios-auth-field">
+                                    <label className="ios-auth-label">Status / Bio (Optional)</label>
+                                    <input
+                                        type="text"
+                                        className="ios-auth-input"
+                                        placeholder="e.g. Focus on habits, finance, and goals"
+                                        value={authForm.bio}
+                                        onChange={(e) => setAuthForm({ ...authForm, bio: e.target.value })}
+                                        maxLength={80}
+                                    />
+                                </div>
+                            )}
+
+                            {/* SAVED PROFILES LIST (ON LOGIN) */}
+                            {authMode === 'login' && savedAccounts.length > 0 && (
+                                <div className="ios-saved-accounts-section">
+                                    <span className="ios-saved-accounts-title">Saved accounts on this device:</span>
+                                    <div className="ios-saved-accounts-list">
+                                        {savedAccounts.map((acc, idx) => (
+                                            <button
+                                                key={idx}
+                                                type="button"
+                                                className="ios-saved-account-pill"
+                                                onClick={() => handleSelectSavedAccount(acc)}
+                                            >
+                                                <div
+                                                    className="ios-saved-account-avatar"
+                                                    style={{ background: getProfileGradient(acc.avatarColor) }}
+                                                >
+                                                    {acc.avatarPhoto ? (
+                                                        <img src={acc.avatarPhoto} alt="" />
+                                                    ) : (
+                                                        getProfileInitials(acc.name, acc.username)
+                                                    )}
+                                                </div>
+                                                <span className="ios-saved-account-name">@{acc.username}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* SUBMIT BUTTON */}
+                            <button type="submit" className="ios-auth-submit-btn">
+                                {authMode === 'signup' ? (
+                                    <>
+                                        <UserPlus size={18} />
+                                        <span>Create Account & Sign In</span>
+                                    </>
+                                ) : authMode === 'login' ? (
+                                    <>
+                                        <LogIn size={18} />
+                                        <span>Log In to Workspace</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Check size={18} />
+                                        <span>Save Profile Changes</span>
+                                    </>
+                                )}
+                            </button>
+
+                            {/* LOG OUT / SWITCH ACCOUNT (EDIT MODE) */}
+                            {authMode === 'edit' && (
+                                <button
+                                    type="button"
+                                    className="ios-auth-logout-btn"
+                                    onClick={handleLogOut}
+                                >
+                                    <LogOut size={16} />
+                                    <span>Log Out & Switch to Guest</span>
+                                </button>
+                            )}
+
+                            {/* BOTTOM SWITCH LINK */}
+                            {authMode === 'login' && (
+                                <p className="ios-auth-switch-prompt">
+                                    Don't have an account yet?{' '}
+                                    <button
+                                        type="button"
+                                        className="ios-auth-inline-link"
+                                        onClick={() => { setAuthMode('signup'); setAuthError(''); }}
+                                    >
+                                        Sign Up with your details
+                                    </button>
+                                </p>
+                            )}
+                            {authMode === 'signup' && (
+                                <p className="ios-auth-switch-prompt">
+                                    Already have an account?{' '}
+                                    <button
+                                        type="button"
+                                        className="ios-auth-inline-link"
+                                        onClick={() => { setAuthMode('login'); setAuthError(''); }}
+                                    >
+                                        Log In here
+                                    </button>
+                                </p>
+                            )}
+                        </form>
                     </div>
                 </div>
             )}

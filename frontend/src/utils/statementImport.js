@@ -115,6 +115,170 @@ const makeDate = (yearValue, monthValue, dayValue) => {
     return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 };
 
+const MONTH_INDEX = new Map([
+    ['jan', 1], ['feb', 2], ['mar', 3], ['apr', 4], ['may', 5], ['jun', 6],
+    ['jul', 7], ['aug', 8], ['sep', 9], ['sept', 9], ['oct', 10], ['nov', 11], ['dec', 12],
+]);
+
+const getStatementPeriodYears = (text) => {
+    const match = text.match(/\b\d{1,2}\s+([A-Z]{3,4})['’](\d{2})\s*-\s*\d{1,2}\s+([A-Z]{3,4})['’](\d{2})/i);
+    if (!match) return null;
+    return {
+        startMonth: MONTH_INDEX.get(match[1].toLowerCase()),
+        startYear: 2000 + Number(match[2]),
+        endMonth: MONTH_INDEX.get(match[3].toLowerCase()),
+        endYear: 2000 + Number(match[4]),
+    };
+};
+
+const parseProviderDate = (text, period) => {
+    const match = text.match(/\b([A-Z]{3,4})\.?\s+(\d{1,2}),?\s*(\d{4})?\b/i)
+        || text.match(/\b(\d{1,2})\s+([A-Z]{3,4})\.?,?\s*(\d{4})?\b/i);
+    if (!match) return null;
+
+    const isMonthFirst = Number.isNaN(Number(match[1]));
+    const month = MONTH_INDEX.get((isMonthFirst ? match[1] : match[2]).toLowerCase());
+    const day = Number(isMonthFirst ? match[2] : match[1]);
+    const explicitYear = Number(match[3]);
+    if (!month || !day) return null;
+
+    let year = Number.isInteger(explicitYear) && explicitYear > 0 ? explicitYear : null;
+    if (!year && period?.startYear) {
+        year = period.startMonth <= period.endMonth
+            ? period.startYear
+            : month >= period.startMonth ? period.startYear : period.endYear;
+    }
+    return year ? makeDate(year, month, day) : null;
+};
+
+const getPdfItemsByLine = (pages) => pages.map(page => {
+    const linesByY = new Map();
+    for (const item of page?.items || []) {
+        if (typeof item?.str !== 'string' || !item.str.trim()) continue;
+        const y = Math.round(Number(item.transform?.[5]) || 0);
+        if (!linesByY.has(y)) linesByY.set(y, []);
+        linesByY.get(y).push({
+            text: item.str.trim(),
+            x: Number(item.transform?.[4]) || 0,
+            y,
+        });
+    }
+
+    return [...linesByY.values()]
+        .map(items => items.sort((a, b) => a.x - b.x))
+        .sort((a, b) => b[0].y - a[0].y);
+});
+
+const getProviderAmount = (text) => {
+    const match = text.match(/([+-]?)\s*(?:₹|Rs\.?\s*)\s*([\d,]+(?:\.\d{1,2})?)/i);
+    if (!match) return null;
+    return parseAmount(`${match[1]}${match[2]}`);
+};
+
+const getProviderResult = (transactions, options) => parseStatementRows([
+    ['Name', 'Amount', 'Date', 'Type'],
+    ...transactions.map(transaction => [
+        transaction.name,
+        transaction.amount,
+        transaction.date,
+        transaction.type,
+    ]),
+], options);
+
+export const parseProviderPdfPages = (pages, options) => {
+    const linesByPage = getPdfItemsByLine(pages);
+    const allText = linesByPage.flatMap(lines => lines.flat().map(item => item.text)).join('\n');
+    const provider = /transaction statement for/i.test(allText)
+        && /transaction id/i.test(allText)
+        ? 'phonepe'
+        : /paytm statement for/i.test(allText) && /passbook payments history/i.test(allText)
+            ? 'paytm'
+            : /transaction statement period/i.test(allText) && /google pay app/i.test(allText)
+                ? 'googlepay'
+                : null;
+    if (!provider) return null;
+
+    const period = getStatementPeriodYears(allText);
+    const transactions = [];
+
+    for (const lines of linesByPage) {
+        const transactionHeaderIndex = provider === 'paytm'
+            ? lines.findIndex(items => items.some(item => /transaction details/i.test(item.text)))
+            : -1;
+        const starts = lines
+            .map((items, index) => {
+                const text = items.map(item => item.text).join(' ');
+                if (provider === 'paytm' && (
+                    index <= transactionHeaderIndex
+                    || !items.some(item => item.x < 100)
+                )) return null;
+                const date = provider === 'paytm'
+                    ? text.match(/\b\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\b/i)
+                    : text.match(/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+\d{4}\b/i)
+                        || text.match(/\b\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?,?\s+\d{4}\b/i);
+                return date ? { index, items, text, date: parseProviderDate(date[0], period) } : null;
+            })
+            .filter(Boolean);
+
+        for (let startIndex = 0; startIndex < starts.length; startIndex++) {
+            const start = starts[startIndex];
+            const endIndex = starts[startIndex + 1]?.index ?? lines.length;
+            const blockLines = lines.slice(start.index, endIndex);
+            const blockItems = blockLines.flat();
+            let name = null;
+            let amount = null;
+            let type = null;
+
+            if (provider === 'phonepe') {
+                const detail = blockItems.find(item => /^(?:payment to|paid to|received from)\b/i.test(item.text));
+                if (detail) {
+                    name = detail.text
+                        .replace(/^(?:payment to|paid to|received from)\s+/i, '')
+                        .replace(/\s*(?:DEBIT|CREDIT)\s*$/i, '')
+                        .trim() || null;
+                }
+                const amountItem = blockItems.find(item => /₹\s*[\d,]+(?:\.\d{1,2})?/.test(item.text));
+                const amountValue = amountItem ? getProviderAmount(amountItem.text) : null;
+                const typeItem = blockItems.find(item => /^(?:DEBIT|CREDIT)$/i.test(item.text));
+                type = typeItem?.text.toLowerCase() === 'credit' ? 'income' : 'expense';
+                if (amountValue !== null) amount = type === 'income' ? Math.abs(amountValue) : -Math.abs(amountValue);
+            } else if (provider === 'googlepay') {
+                const detail = blockItems.find(item => /^(?:received from|paid to)\b/i.test(item.text));
+                if (detail) {
+                    name = detail.text.replace(/^(?:received from|paid to)\s+/i, '').trim() || null;
+                    type = /^received from\b/i.test(detail.text) ? 'income' : 'expense';
+                }
+                const amountItem = blockItems.find(item => /₹\s*[\d,]+(?:\.\d{1,2})?/.test(item.text));
+                const amountValue = amountItem ? getProviderAmount(amountItem.text) : null;
+                if (amountValue !== null) amount = type === 'income' ? Math.abs(amountValue) : -Math.abs(amountValue);
+            } else {
+                const amountItem = blockItems.find(item => item.x > 400 && /[+-]\s*Rs\.?\s*[\d,]+(?:\.\d{1,2})?/i.test(item.text));
+                amount = amountItem ? getProviderAmount(amountItem.text) : null;
+                type = amount > 0 ? 'income' : 'expense';
+                const nameItems = blockItems.filter(item => item.x >= 70 && item.x < 290)
+                    .map(item => item.text)
+                    .filter(text => !/^(?:UPI ID:|UPI Ref No:|Tag:|# Money|Canara Bank|Other UPI|App -|Pay$)/i.test(text));
+                const sentTo = nameItems.findIndex(text => /^Money sent to\b/i.test(text));
+                if (sentTo >= 0) {
+                    const firstName = nameItems[sentTo].replace(/^Money sent to\s+/i, '').trim();
+                    const continuation = nameItems[sentTo + 1] && !/^UPI ID:/i.test(nameItems[sentTo + 1])
+                        ? nameItems[sentTo + 1]
+                        : '';
+                    name = [firstName, continuation].filter(Boolean).join(' ').trim() || null;
+                } else {
+                    name = nameItems.find(text => !/^(?:Money received|Received from|#)/i.test(text)) || null;
+                }
+            }
+
+            if (start.date && name && amount !== null && amount !== 0 && type) {
+                transactions.push({ name, amount, date: start.date, type });
+            }
+        }
+    }
+
+    return getProviderResult(transactions, options);
+};
+
 const inferCategory = (name, customCategories = []) => {
     const description = name.toLowerCase();
     const matchedRule = CATEGORY_RULES.find(({ pattern }) => pattern.test(description));
@@ -223,6 +387,9 @@ export const parseStatementRows = (rows, { customCategories = [] } = {}) => {
 };
 
 export const parsePdfPageItems = (pages, options) => {
+    const providerResult = parseProviderPdfPages(pages, options);
+    if (providerResult) return providerResult;
+
     const rows = [];
 
     for (const page of pages) {

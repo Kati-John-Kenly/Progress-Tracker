@@ -23,7 +23,10 @@ import {
     Volume2,
     VolumeX,
     GripHorizontal,
-    SlidersHorizontal
+    SlidersHorizontal,
+    Copy,
+    Check,
+    Pencil
 } from 'lucide-react';
 import { processAgentMessage } from '../ai/agentEngine';
 import GeminiIcon from './GeminiIcon';
@@ -288,11 +291,25 @@ export default function AIAssistantBot({ onOpenStreakModal }) {
     });
     const [speakingMsgId, setSpeakingMsgId] = useState(null);
 
+    // Copy & Inline Edit Message State
+    const [copiedMsgId, setCopiedMsgId] = useState(null);
+    const [editingMsgId, setEditingMsgId] = useState(null);
+    const [editingText, setEditingText] = useState('');
+
     // Multi-conversation state
     const [conversations, setConversations] = useState(loadInitialConversations);
     const [activeConvId, setActiveConvId] = useState(() => loadInitialActiveId(conversations));
 
     const [isDraggingFab, setIsDraggingFab] = useState(false);
+    const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 640);
+
+    useEffect(() => {
+        const handleMobileResize = () => {
+            setIsMobile(window.innerWidth <= 640);
+        };
+        window.addEventListener('resize', handleMobileResize);
+        return () => window.removeEventListener('resize', handleMobileResize);
+    }, []);
 
     // MOVABLE POSITION STATES
     const [windowPos, setWindowPos] = useState(() => {
@@ -948,6 +965,125 @@ export default function AIAssistantBot({ onOpenStreakModal }) {
         }
     };
 
+    // COPY MESSAGE TEXT HANDLER
+    const handleCopyMessage = async (msgId, text) => {
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopiedMsgId(msgId);
+            setTimeout(() => setCopiedMsgId(null), 2000);
+        } catch {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+                document.execCommand('copy');
+                setCopiedMsgId(msgId);
+                setTimeout(() => setCopiedMsgId(null), 2000);
+            } catch {}
+            document.body.removeChild(textarea);
+        }
+    };
+
+    // EDIT MESSAGE HANDLERS
+    const handleStartEdit = (msg) => {
+        setEditingMsgId(msg.id);
+        setEditingText(msg.text);
+    };
+
+    const handleCancelEdit = () => {
+        setEditingMsgId(null);
+        setEditingText('');
+    };
+
+    const handleSaveEdit = async (msgId, resend = false) => {
+        const trimmed = editingText.trim();
+        if (!trimmed) return;
+
+        const convId = activeConvId;
+        let targetMsgSender = 'user';
+
+        setConversations(prev => prev.map(conv => {
+            if (conv.id !== convId) return conv;
+            const msgIndex = conv.messages.findIndex(m => m.id === msgId);
+            if (msgIndex === -1) return conv;
+            targetMsgSender = conv.messages[msgIndex].sender;
+
+            let newMessages = [...conv.messages];
+            if (resend && targetMsgSender === 'user') {
+                newMessages = newMessages.slice(0, msgIndex + 1);
+                newMessages[msgIndex] = {
+                    ...newMessages[msgIndex],
+                    text: trimmed,
+                    isEdited: true,
+                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                };
+            } else {
+                newMessages[msgIndex] = {
+                    ...newMessages[msgIndex],
+                    text: trimmed,
+                    isEdited: true,
+                };
+            }
+
+            return {
+                ...conv,
+                updatedAt: new Date().toISOString(),
+                messages: newMessages,
+            };
+        }));
+
+        setEditingMsgId(null);
+        setEditingText('');
+
+        if (resend && targetMsgSender === 'user') {
+            setIsTyping(true);
+            try {
+                const response = await processAgentMessage(trimmed);
+                const botMsg = {
+                    id: 'bot-' + Date.now(),
+                    sender: 'bot',
+                    text: response.text,
+                    action: response.action,
+                    isGuardrail: response.isGuardrail,
+                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                };
+
+                setConversations(prev => prev.map(conv => {
+                    if (conv.id !== convId) return conv;
+                    return {
+                        ...conv,
+                        updatedAt: new Date().toISOString(),
+                        messages: [...conv.messages, botMsg],
+                    };
+                }));
+
+                if (autoSpeak && response.text) {
+                    setTimeout(() => speakMessage(response.text, botMsg.id), 300);
+                }
+            } catch {
+                const errMsg = {
+                    id: 'bot-err-' + Date.now(),
+                    sender: 'bot',
+                    text: `❌ Error processing request. Please try again.`,
+                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                };
+                setConversations(prev => prev.map(conv => {
+                    if (conv.id !== convId) return conv;
+                    return {
+                        ...conv,
+                        updatedAt: new Date().toISOString(),
+                        messages: [...conv.messages, errMsg],
+                    };
+                }));
+            } finally {
+                setIsTyping(false);
+            }
+        }
+    };
+
     const handleActionClick = (action) => {
         if (!action) return;
         if (action.path) {
@@ -992,12 +1128,12 @@ export default function AIAssistantBot({ onOpenStreakModal }) {
 
     return (
         <>
-            {/* MOVABLE CHAT WINDOW */}
+            {/* MOVABLE CHAT WINDOW (DESKTOP DRAGGABLE, MOBILE FULL SCREEN RATIO) */}
             {isOpen && (
                 <div
                     ref={chatWindowRef}
-                    className={`aura-window ${isMinimized ? 'minimized' : ''}`}
-                    style={{
+                    className={`aura-window ${isMinimized ? 'minimized' : ''} ${isMobile ? 'mobile-fullscreen' : ''}`}
+                    style={isMobile ? undefined : {
                         left: `${windowPos.x}px`,
                         top: `${windowPos.y}px`,
                         right: 'auto',
@@ -1309,9 +1445,59 @@ export default function AIAssistantBot({ onOpenStreakModal }) {
                                                         </div>
                                                     )}
 
-                                                    <div className="aura-bubble-text">
-                                                        {renderFormattedText(msg.text)}
-                                                    </div>
+                                                    {editingMsgId === msg.id ? (
+                                                        <div className="aura-edit-msg-container">
+                                                            <textarea
+                                                                className="aura-edit-msg-textarea"
+                                                                value={editingText}
+                                                                onChange={(e) => setEditingText(e.target.value)}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Escape') {
+                                                                        handleCancelEdit();
+                                                                    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                                                        e.preventDefault();
+                                                                        handleSaveEdit(msg.id, msg.sender === 'user');
+                                                                    }
+                                                                }}
+                                                                rows={Math.min(5, Math.max(2, editingText.split('\n').length))}
+                                                                autoFocus
+                                                                aria-label="Edit message text"
+                                                            />
+                                                            <div className="aura-edit-msg-actions">
+                                                                <button
+                                                                    type="button"
+                                                                    className="aura-edit-btn cancel"
+                                                                    onClick={handleCancelEdit}
+                                                                >
+                                                                    Cancel
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    className="aura-edit-btn save"
+                                                                    onClick={() => handleSaveEdit(msg.id, false)}
+                                                                    disabled={!editingText.trim()}
+                                                                >
+                                                                    Save
+                                                                </button>
+                                                                {msg.sender === 'user' && (
+                                                                    <button
+                                                                        type="button"
+                                                                        className="aura-edit-btn resend"
+                                                                        onClick={() => handleSaveEdit(msg.id, true)}
+                                                                        disabled={!editingText.trim() || isTyping}
+                                                                        title="Update message and regenerate AI response"
+                                                                    >
+                                                                        <Sparkles size={11} />
+                                                                        <span>Save & Resend</span>
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="aura-bubble-text">
+                                                            {renderFormattedText(msg.text)}
+                                                        </div>
+                                                    )}
 
                                                     {/* ACTION CARDS (ONLY RENDER IF ACTUAL ACTIONABLE BUTTON EXISTS) */}
                                                     {hasValidActionCard(msg.action) && (
@@ -1418,21 +1604,54 @@ export default function AIAssistantBot({ onOpenStreakModal }) {
                                                         </div>
                                                     )}
 
-                                                    {/* BUBBLE FOOTER: TIMESTAMP & AI VOICE PLAY BUTTON */}
+                                                    {/* BUBBLE FOOTER: COPY, EDIT, VOICE & TIMESTAMP */}
                                                     <div className="aura-bubble-footer">
-                                                        {msg.sender === 'bot' && (
+                                                        <div className="aura-bubble-footer-actions">
+                                                            {/* COPY TEXT OPTION */}
                                                             <button
                                                                 type="button"
-                                                                className={`aura-speak-btn ${speakingMsgId === msg.id ? 'speaking' : ''}`}
-                                                                onClick={() => speakMessage(msg.text, msg.id)}
-                                                                title={speakingMsgId === msg.id ? 'Stop audio' : 'Listen with AI voice'}
-                                                                aria-label="Speak response"
+                                                                className={`aura-msg-action-btn copy ${copiedMsgId === msg.id ? 'copied' : ''}`}
+                                                                onClick={() => handleCopyMessage(msg.id, msg.text)}
+                                                                title={copiedMsgId === msg.id ? 'Copied to clipboard!' : 'Copy text'}
+                                                                aria-label="Copy message text"
                                                             >
-                                                                {speakingMsgId === msg.id ? <VolumeX size={12} /> : <Volume2 size={12} />}
-                                                                <span>{speakingMsgId === msg.id ? 'Stop' : 'Voice'}</span>
+                                                                {copiedMsgId === msg.id ? <Check size={11} color="#22c55e" /> : <Copy size={11} />}
+                                                                <span>{copiedMsgId === msg.id ? 'Copied!' : 'Copy'}</span>
                                                             </button>
-                                                        )}
-                                                        <span className="aura-timestamp">{msg.timestamp}</span>
+
+                                                            {/* EDIT TEXT OPTION */}
+                                                            {editingMsgId !== msg.id && (
+                                                                <button
+                                                                    type="button"
+                                                                    className="aura-msg-action-btn edit"
+                                                                    onClick={() => handleStartEdit(msg)}
+                                                                    title="Edit text"
+                                                                    aria-label="Edit message text"
+                                                                >
+                                                                    <Pencil size={11} />
+                                                                    <span>Edit</span>
+                                                                </button>
+                                                            )}
+
+                                                            {/* AI VOICE PLAY BUTTON (BOT ONLY) */}
+                                                            {msg.sender === 'bot' && (
+                                                                <button
+                                                                    type="button"
+                                                                    className={`aura-speak-btn ${speakingMsgId === msg.id ? 'speaking' : ''}`}
+                                                                    onClick={() => speakMessage(msg.text, msg.id)}
+                                                                    title={speakingMsgId === msg.id ? 'Stop audio' : 'Listen with AI voice'}
+                                                                    aria-label="Speak response"
+                                                                >
+                                                                    {speakingMsgId === msg.id ? <VolumeX size={11} /> : <Volume2 size={11} />}
+                                                                    <span>{speakingMsgId === msg.id ? 'Stop' : 'Voice'}</span>
+                                                                </button>
+                                                            )}
+                                                        </div>
+
+                                                        <div className="aura-bubble-footer-meta">
+                                                            {msg.isEdited && <span className="aura-edited-badge">Edited</span>}
+                                                            <span className="aura-timestamp">{msg.timestamp}</span>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -1517,23 +1736,24 @@ export default function AIAssistantBot({ onOpenStreakModal }) {
                 </div>
             )}
 
-            {/* FLOATING DRAGGABLE FAB BUTTON (WHEN CHAT CLOSED) */}
+            {/* FLOATING FAB BUTTON (DESKTOP DRAGGABLE, MOBILE DOCKED ABOVE BOTTOM NAV) */}
             {!isOpen && (
                 <button
                     ref={fabRef}
                     type="button"
-                    className={`aura-fab ${isDraggingFab ? 'dragging' : ''}`}
-                    style={{
+                    className={`aura-fab ${isDraggingFab ? 'dragging' : ''} ${isMobile ? 'mobile-docked' : ''}`}
+                    style={isMobile ? undefined : {
                         left: `${fabPos.x}px`,
                         top: `${fabPos.y}px`,
                         right: 'auto',
                         bottom: 'auto',
                     }}
-                    onPointerDown={handleFabPointerDown}
-                    onPointerMove={handleFabPointerMove}
-                    onPointerUp={handleFabPointerUp}
-                    aria-label="Open Aura AI assistant (Drag to move left or right)"
-                    title="Chat with Aura • Drag to snap left or right"
+                    onPointerDown={isMobile ? undefined : handleFabPointerDown}
+                    onPointerMove={isMobile ? undefined : handleFabPointerMove}
+                    onPointerUp={isMobile ? undefined : handleFabPointerUp}
+                    onClick={isMobile ? openChat : undefined}
+                    aria-label="Open Aura AI assistant"
+                    title={isMobile ? "Chat with Aura" : "Chat with Aura • Drag to snap left or right"}
                 >
                     <GeminiIcon size={26} className="aura-gemini-logo" />
                 </button>

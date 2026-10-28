@@ -483,9 +483,229 @@ body.light-theme .aura-gemini-logo {
     align-items: center;
     justify-content: space-between;
     gap: 6px;
-    margin-top: 5px;
-    padding-top: 3px;
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    margin-top: 6px;
+    padding-top: 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.aura-bubble.user .aura-bubble-footer {
+    border-top-color: rgba(255, 255, 255, 0.2);
+}
+
+body.light-theme .aura-bubble.bot .aura-bubble-footer {
+    border-top-color: rgba(0, 0, 0, 0.08);
+}
+
+.aura-bubble-footer-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.aura-bubble-footer-meta {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.aura-edited-badge {
+    font-size: 0.6rem;
+    font-style: italic;
+    opacity: 0.7;
+    background: rgba(255, 255, 255, 0.08);
+    padding: 1px 5px;
+    border-radius: 4px;
+}
+
+.aura-bubble.user .aura-edited-badge {
+    background: rgba(0, 0, 0, 0.15);
+}
+
+.aura-msg-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 6px;
+    border-radius: 5px;
+    font-size: 0.64rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: none;
+    line-height: 1.2;
+}
+
+/* User Message Action Buttons */
+.aura-bubble.user .aura-msg-action-btn {
+    background: rgba(0, 0, 0, 0.16);
+    color: rgba(255, 255, 255, 0.88);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.aura-bubble.user .aura-msg-action-btn:hover {
+    background: rgba(0, 0, 0, 0.32);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.aura-bubble.user .aura-msg-action-btn.copied {
+    color: #86efac;
+    border-color: rgba(134, 239, 172, 0.45);
+    background: rgba(0, 0, 0, 0.25);
+}
+
+/* Bot Message Action Buttons */
+.aura-bubble.bot .aura-msg-action-btn {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-muted);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.aura-bubble.bot .aura-msg-action-btn:hover {
+    background: rgba(59, 130, 246, 0.14);
+    color: #3b82f6;
+    border-color: rgba(59, 130, 246, 0.3);
+}
+
+.aura-bubble.bot .aura-msg-action-btn.copied {
+    color: #10b981;
+    background: rgba(16, 185, 129, 0.12);
+    border-color: rgba(16, 185, 129, 0.35);
+}
+
+/* Light Theme Bot Actions */
+body.light-theme .aura-bubble.bot .aura-msg-action-btn {
+    background: rgba(0, 0, 0, 0.04);
+    color: #64748b;
+    border-color: rgba(0, 0, 0, 0.08);
+}
+
+body.light-theme .aura-bubble.bot .aura-msg-action-btn:hover {
+    background: rgba(59, 130, 246, 0.12);
+    color: #2563eb;
+    border-color: rgba(59, 130, 246, 0.28);
+}
+
+/* INLINE MESSAGE EDITING STYLES */
+.aura-edit-msg-container {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    min-width: 200px;
+    box-sizing: border-box;
+}
+
+.aura-edit-msg-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 7px 9px;
+    border-radius: 8px;
+    font-size: 0.81rem;
+    line-height: 1.4;
+    font-family: inherit;
+    resize: vertical;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.aura-bubble.user .aura-edit-msg-textarea {
+    background: rgba(0, 0, 0, 0.25);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.aura-bubble.user .aura-edit-msg-textarea:focus {
+    border-color: #ffffff;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
+}
+
+.aura-bubble.bot .aura-edit-msg-textarea {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-main);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.aura-bubble.bot .aura-edit-msg-textarea:focus {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+body.light-theme .aura-bubble.bot .aura-edit-msg-textarea {
+    background: #f8fafc;
+    color: #0f172a;
+    border-color: #cbd5e1;
+}
+
+.aura-edit-msg-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.aura-edit-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 9px;
+    border-radius: 6px;
+    font-size: 0.68rem;
+    font-weight: 650;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: none;
+}
+
+.aura-edit-btn.cancel {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-muted);
+}
+
+.aura-bubble.user .aura-edit-btn.cancel {
+    background: rgba(0, 0, 0, 0.2);
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.aura-edit-btn.cancel:hover {
+    background: rgba(255, 255, 255, 0.18);
+    color: var(--text-main);
+}
+
+.aura-edit-btn.save {
+    background: #3b82f6;
+    color: #ffffff;
+}
+
+.aura-bubble.user .aura-edit-btn.save {
+    background: rgba(255, 255, 255, 0.25);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+.aura-edit-btn.save:hover:not(:disabled) {
+    filter: brightness(1.15);
+    transform: translateY(-1px);
+}
+
+.aura-edit-btn.resend {
+    background: linear-gradient(135deg, #10b981, #06b6d4);
+    color: #ffffff;
+    box-shadow: 0 2px 6px rgba(16, 185, 129, 0.35);
+}
+
+.aura-edit-btn.resend:hover:not(:disabled) {
+    filter: brightness(1.12);
+    transform: translateY(-1px);
+}
+
+.aura-edit-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 .aura-speak-btn {
@@ -971,32 +1191,74 @@ body.light-theme .aura-speak-btn {
 
 
 /* =========================================================
-   MOBILE RATIO ADAPTATIONS (PREVENTS BOT GOING UNDER BOTTOM SCREEN)
+   FULL SCREEN MOBILE RATIO FOR REAL MOBILES (NO BROWSER ARTIFACTS)
    ========================================================= */
-@media (max-width: 600px) {
+@media (max-width: 640px) {
     .aura-window:not(.minimized) {
         position: fixed !important;
-        left: 12px !important;
-        right: 12px !important;
-        width: auto !important;
-        max-width: calc(100vw - 24px) !important;
-        top: auto !important;
-        bottom: calc(76px + env(safe-area-inset-bottom, 0px)) !important;
-        height: min(490px, calc(100dvh - 90px - env(safe-area-inset-bottom, 0px))) !important;
-        max-height: calc(100dvh - 90px - env(safe-area-inset-bottom, 0px)) !important;
-        border-radius: 20px !important;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6) !important;
+        inset: 0 !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        width: 100vw !important;
+        max-width: 100vw !important;
+        height: 100% !important;
+        height: 100dvh !important;
+        max-height: 100dvh !important;
+        border-radius: 0 !important;
+        border: none !important;
+        z-index: 10000 !important;
+        display: flex !important;
+        flex-direction: column !important;
+        background: var(--bg-card) !important;
+        box-shadow: none !important;
+        margin: 0 !important;
+        padding-top: env(safe-area-inset-top, 0px) !important;
+        padding-bottom: env(safe-area-inset-bottom, 0px) !important;
     }
 
+    .aura-window:not(.minimized) .aura-swipe-handle-bar {
+        padding-top: 6px;
+    }
+
+    .aura-window:not(.minimized) .aura-header {
+        padding: 8px 14px 10px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .aura-window:not(.minimized) .aura-messages {
+        flex: 1 1 0% !important;
+        min-height: 0 !important;
+        height: 100% !important;
+        padding: 12px 14px !important;
+    }
+
+    .aura-window:not(.minimized) .aura-input-bar {
+        padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px)) !important;
+        border-top: 1px solid var(--border) !important;
+    }
+
+    /* Floating Minimized Pill on Mobile (Locked above bottom dock) */
     .aura-window.minimized {
-        bottom: calc(78px + env(safe-area-inset-bottom, 0px)) !important;
-        top: auto !important;
-        right: 20px !important;
+        position: fixed !important;
+        bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
+        right: 16px !important;
         left: auto !important;
+        top: auto !important;
+        z-index: 9999 !important;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
     }
 
+    /* Floating FAB Trigger on Mobile (Locked above bottom dock) */
     .aura-fab {
-        bottom: calc(78px + env(safe-area-inset-bottom, 0px)) !important;
+        position: fixed !important;
+        bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
+        right: 16px !important;
+        left: auto !important;
+        top: auto !important;
+        z-index: 9999 !important;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
     }
 }
 

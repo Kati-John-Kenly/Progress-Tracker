@@ -6,6 +6,13 @@ import { formatAmount } from './numberFormat.js';
 
 const standardHeader = ['Name', 'Bank', 'Amount', 'Date', 'Status'];
 
+const pdfPage = (entries) => ({
+    items: entries.map(([text, x, y]) => ({
+        str: text,
+        transform: [1, 0, 0, 1, x, y],
+    })),
+});
+
 test('classifies a positive credit as income', () => {
     const result = parseStatementRows([
         standardHeader,
@@ -118,6 +125,79 @@ test('reports malformed transaction rows instead of crashing on missing dates', 
     assert.equal(result.candidateRows, 1);
     assert.equal(result.skippedCount, 1);
     assert.equal(result.skippedReasons.date, 1);
+});
+
+test('parses PhonePe transaction statement records', () => {
+    const result = parsePdfPageItems([pdfPage([
+        ['Transaction Statement for', 20, 700],
+        ['Transaction ID', 20, 680],
+        ['Date', 20, 640],
+        ['Oct 08, 2026', 20, 600],
+        ['Payment to Ninjasalary Financial Services Pvt Ltd', 100, 575],
+        ['DEBIT', 420, 575],
+        ['₹1,000', 500, 575],
+        ['Oct 03, 2026', 20, 540],
+        ['Received from John Smith', 100, 515],
+        ['CREDIT', 420, 515],
+        ['₹250', 500, 515],
+    ])]);
+
+    assert.deepEqual(result.transactions.map(({ name, date, amount, type }) => ({
+        name, date, amount, type,
+    })), [
+        {
+            name: 'Ninjasalary Financial Services Pvt Ltd',
+            date: '2026-10-08',
+            amount: 1000,
+            type: 'expense',
+        },
+        { name: 'John Smith', date: '2026-10-03', amount: 250, type: 'income' },
+    ]);
+});
+
+test('parses Paytm yearless dates and wrapped outgoing names', () => {
+    const result = parsePdfPageItems([pdfPage([
+        ['Paytm Statement for', 20, 700],
+        ['Passbook Payments History', 20, 680],
+        ["28 SEP'26 - 27 OCT'26", 20, 660],
+        ['Transaction Details', 90, 640],
+        ['13 Oct', 23, 620],
+        ['Money sent to Chilamakuri Jathin', 91, 620],
+        ['Kumar', 91, 600],
+        ['- Rs.20', 492, 620],
+        ['28 Sep', 23, 560],
+        ['Kati John Benny', 91, 560],
+        ['# Money Received', 302, 560],
+        ['+ Rs.2,000', 492, 560],
+    ])]);
+
+    assert.deepEqual(result.transactions.map(({ name, date, amount, type }) => ({
+        name, date, amount, type,
+    })), [
+        { name: 'Chilamakuri Jathin Kumar', date: '2026-10-13', amount: 20, type: 'expense' },
+        { name: 'Kati John Benny', date: '2026-09-28', amount: 2000, type: 'income' },
+    ]);
+});
+
+test('parses Google Pay payment names without bank metadata', () => {
+    const result = parsePdfPageItems([pdfPage([
+        ['Transaction Statement Period', 20, 700],
+        ['Google Pay app', 20, 680],
+        ['12 Sep, 2026', 24, 640],
+        ['Received from John Smith', 164, 620],
+        ['Paid to State Bank of India 7395', 181, 600],
+        ['₹1,200', 549, 640],
+        ['12 Sep, 2026', 24, 580],
+        ['Paid to Cafe', 164, 560],
+        ['₹100', 549, 560],
+    ])]);
+
+    assert.deepEqual(result.transactions.map(({ name, date, amount, type }) => ({
+        name, date, amount, type,
+    })), [
+        { name: 'John Smith', date: '2026-09-12', amount: 1200, type: 'income' },
+        { name: 'Cafe', date: '2026-09-12', amount: 100, type: 'expense' },
+    ]);
 });
 
 const statementPath = globalThis.process?.env?.STATEMENT_TEST_PDF;

@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "name": "Progress • Personal Productivity & Habit Tracker",
+  "short_name": "Progress",
+  "description": "A personal productivity and habit tracker.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#111827",
+  "theme_color": "#111827",
+  "icons": [
+    {
+      "src": "/pwa-icon.png",
+      "sizes": "239x243",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

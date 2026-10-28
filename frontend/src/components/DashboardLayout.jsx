@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { House, ListTodo, Wallet, Settings as SettingsIcon, Sparkles, Bell, X, ChevronRight, Flame, Quote, BarChart3, Search, Smile } from 'lucide-react';
+import { House, ListTodo, Wallet, Settings as SettingsIcon, Sparkles, Bell, X, ChevronRight, Flame, Quote, BarChart3, Search, Smile, Lock } from 'lucide-react';
 import AIAssistantBot from './AIAssistantBot';
 import GeminiIcon from './GeminiIcon';
-import { subscribeWorkspaceChange, calculateStreakStats, getStoredRoutineTasks } from '../utils/workspaceEvents';
+import { subscribeWorkspaceChange, calculateStreakStats, getStoredRoutineTasks, getStoredUserProfile, setStoredUserProfile } from '../utils/workspaceEvents';
 import { hasSavedDeviceBiometric, verifyDeviceBiometric } from '../utils/deviceBiometrics';
 import { isLocalPasscodeConfigured, verifyLocalPasscode } from '../utils/localPasscode';
 
@@ -29,12 +29,13 @@ const isAppLockEnabled = () => (
 
 const DashboardLayout = () => {
     const [menuOpen, setMenuOpen] = useState(false);
+    const [userProfile, setUserProfile] = useState(() => getStoredUserProfile());
     const [headerSearch, setHeaderSearch] = useState('');
     const [isLocked, setIsLocked] = useState(() => isAppLockEnabled());
     const [unlockPin, setUnlockPin] = useState('');
     const [unlockError, setUnlockError] = useState('');
     const [isUnlocking, setIsUnlocking] = useState(false);
-    
+
     // Streak & Modal State
     const [showStreakModal, setShowStreakModal] = useState(false);
     const [streak, setStreak] = useState(0);
@@ -51,10 +52,10 @@ const DashboardLayout = () => {
         }
     });
     const [notifQuote] = useState(() => DAILY_NOTIF_QUOTES[Math.floor(Math.random() * DAILY_NOTIF_QUOTES.length)]);
-    
+
     // Calendar State
     const [viewDate, setViewDate] = useState(new Date());
-    
+
     const navigate = useNavigate();
     const location = useLocation();
     const pageTitle = location.pathname === '/routine' ? 'Habits'
@@ -75,8 +76,11 @@ const DashboardLayout = () => {
     // Workspace subscription (Optimized dependencies: only on mount / refreshData)
     useEffect(() => {
         refreshData();
-        const unsubscribe = subscribeWorkspaceChange(() => {
+        const unsubscribe = subscribeWorkspaceChange((detail) => {
             refreshData();
+            if (detail?.type === 'user_profile') {
+                setUserProfile(detail.profile || getStoredUserProfile());
+            }
         });
         const handleOpenModal = () => setShowStreakModal(true);
         window.addEventListener('open-streak-modal', handleOpenModal);
@@ -137,7 +141,7 @@ const DashboardLayout = () => {
     const todayTasks = useMemo(() => tasks.filter(t => t.date === todayStr), [tasks, todayStr]);
     const todayTasksCount = todayTasks.length;
     const completedTasksCount = todayTasks.filter(t => t.completed).length;
-    const remainingTasksCount = todayTasksCount - completedTasksCount; 
+    const remainingTasksCount = todayTasksCount - completedTasksCount;
 
     // Calendar Renderer Logic
     const currentMonth = viewDate.getMonth();
@@ -158,13 +162,13 @@ const DashboardLayout = () => {
         for (let i = 0; i < firstDay; i++) {
             days.push(<div key={`empty-${i}`} className="cal-day empty" />);
         }
-        
+
         for (let i = 1; i <= daysInMonth; i++) {
             const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
             const dayTasks = tasks.filter(t => t.date === dateStr);
             const totalTasks = dayTasks.length;
             const completedTasks = dayTasks.filter(t => t.completed).length;
-            
+
             let statusClass = 'none';
             if (totalTasks > 0) {
                 if (completedTasks === totalTasks) statusClass = 'perfect';
@@ -186,6 +190,17 @@ const DashboardLayout = () => {
         return days;
     };
 
+    const userInitial = userProfile?.name
+        ? userProfile.name.trim().charAt(0).toUpperCase()
+        : (userProfile?.username ? userProfile.username.charAt(0).toUpperCase() : 'P');
+
+    const userAvatarGradient = userProfile?.avatarColor === 'gradient-purple' ? 'linear-gradient(135deg, #a855f7, #ec4899)'
+        : userProfile?.avatarColor === 'gradient-emerald' ? 'linear-gradient(135deg, #10b981, #06b6d4)'
+        : userProfile?.avatarColor === 'gradient-amber' ? 'linear-gradient(135deg, #f59e0b, #ef4444)'
+        : userProfile?.avatarColor === 'gradient-rose' ? 'linear-gradient(135deg, #f43f5e, #fb7185)'
+        : userProfile?.avatarColor === 'gradient-indigo' ? 'linear-gradient(135deg, #6366f1, #3b82f6)'
+        : 'linear-gradient(135deg, #3b82f6, #8b5cf6)';
+
     return (
         <div className="app-layout">
             {/* UPGRADED STREAK MODAL OVERLAY (LIGHT/DARK THEME CLEAN) */}
@@ -202,11 +217,11 @@ const DashboardLayout = () => {
                                 ✕
                             </button>
                         </div>
-                        
+
                         <p className="streak-modal-sub">
                             Complete 100% of your scheduled tasks daily to build and maintain your streak.
                         </p>
-                        
+
                         {/* Side-by-Side Stats */}
                         <div className="streak-stats-row">
                             <div className="streak-stat-box current">
@@ -294,17 +309,17 @@ const DashboardLayout = () => {
                                     </div>
                                     <h4 className="notif-title">
                                         {todayTasksCount === 0
-                                            ? "No tasks planned for today"
-                                            : remainingTasksCount === 0
-                                            ? `All ${todayTasksCount} tasks completed! 🎉`
-                                            : `${remainingTasksCount} task${remainingTasksCount === 1 ? '' : 's'} remaining (${completedTasksCount}/${todayTasksCount} finished)`}
+                                             ? "No tasks planned for today"
+                                             : remainingTasksCount === 0
+                                             ? `All ${todayTasksCount} tasks completed! 🎉`
+                                             : `${remainingTasksCount} task${remainingTasksCount === 1 ? '' : 's'} remaining (${completedTasksCount}/${todayTasksCount} finished)`}
                                     </h4>
                                     <p className="notif-desc">
                                         {todayTasksCount === 0
-                                            ? "Tap here to plan your focus routine and set your goals."
-                                            : remainingTasksCount === 0
-                                            ? "Incredible focus today! You've achieved 100% of your targets."
-                                            : "Tap to open your routine planner and conquer your next habit."}
+                                             ? "Tap here to plan your focus routine and set your goals."
+                                             : remainingTasksCount === 0
+                                             ? "Incredible focus today! You've achieved 100% of your targets."
+                                             : "Tap to open your routine planner and conquer your next habit."}
                                     </p>
                                 </div>
                                 <ChevronRight size={16} className="notif-arrow" />
@@ -327,15 +342,15 @@ const DashboardLayout = () => {
                                     </div>
                                     <h4 className="notif-title">
                                         {streak === 0
-                                            ? "Ignite your consistency streak today!"
-                                            : "Don't let your streak die!"}
+                                             ? "Ignite your consistency streak today!"
+                                             : "Don't let your streak die!"}
                                     </h4>
                                     <p className="notif-desc">
                                         {remainingTasksCount > 0
-                                            ? `Complete your ${remainingTasksCount} remaining task${remainingTasksCount === 1 ? '' : 's'} before midnight to protect your flame.`
-                                            : todayTasksCount === 0
-                                            ? "Complete at least one task today to build your unbroken streak."
-                                            : "Flame secured for today! Keep the momentum alive tomorrow."}
+                                             ? `Complete your ${remainingTasksCount} remaining task${remainingTasksCount === 1 ? '' : 's'} before midnight to protect your flame.`
+                                             : todayTasksCount === 0
+                                             ? "Complete at least one task today to build your unbroken streak."
+                                             : "Flame secured for today! Keep the momentum alive tomorrow."}
                                     </p>
                                 </div>
                                 <ChevronRight size={16} className="notif-arrow" />
@@ -457,19 +472,52 @@ const DashboardLayout = () => {
                         <button
                             className="user-avatar"
                             type="button"
-                            aria-label="Workspace menu"
+                            aria-label="Workspace profile menu"
                             aria-expanded={menuOpen}
                             onClick={() => setMenuOpen(!menuOpen)}
+                            style={userProfile?.avatarPhoto ? { padding: 0, overflow: 'hidden' } : { background: userAvatarGradient }}
                         >
-                            P
+                            {userProfile?.avatarPhoto ? (
+                                <img src={userProfile.avatarPhoto} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+                            ) : (
+                                userInitial
+                            )}
                         </button>
-                        
+
                         {menuOpen && (
                             <div className="profile-menu">
                                 <div className="profile-menu-info">
-                                    <strong id="menuUserName">Personal Workspace</strong>
+                                    <strong id="menuUserName">{userProfile?.name || 'Personal Workspace'}</strong>
+                                    <span className="profile-menu-sub">{userProfile?.username ? `@${userProfile.username}` : 'Guest Profile'}</span>
+                                    {userProfile?.email && <span className="profile-menu-email">{userProfile.email}</span>}
                                 </div>
-                                <button type="button" onClick={() => { setMenuOpen(false); navigate('/settings'); }}>Settings</button>
+                                <button type="button" onClick={() => { setMenuOpen(false); navigate('/settings'); }}>
+                                    Settings & Profile
+                                </button>
+                                {userProfile ? (
+                                    <button
+                                        type="button"
+                                        className="profile-menu-logout"
+                                        onClick={() => {
+                                            setStoredUserProfile(null);
+                                            setUserProfile(null);
+                                            setMenuOpen(false);
+                                        }}
+                                    >
+                                        Log Out
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        className="profile-menu-login-cta"
+                                        onClick={() => {
+                                            setMenuOpen(false);
+                                            navigate('/settings');
+                                        }}
+                                    >
+                                        Log In / Sign Up
+                                    </button>
+                                )}
                             </div>
                         )}
                     </div>

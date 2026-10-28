@@ -1,17 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Doughnut } from 'react-chartjs-2';
-import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import {
     Check,
     Clock,
     Plus,
-    ArrowUpRight,
-    ArrowDownLeft,
     Wallet,
     Calendar,
     Sparkles,
-    TrendingUp,
     ChevronRight,
     ListTodo,
 } from 'lucide-react';
@@ -25,8 +20,6 @@ import {
 import { getStatementTotals } from '../utils/statementImport';
 import { formatAmount } from '../utils/numberFormat';
 import { getTaskCategoryMeta, getTaskDurationLabel, getLocalDateString } from './RoutineView';
-
-ChartJS.register(ArcElement, Tooltip, Legend);
 
 const getRecentActivity = (tasks, endDate = new Date()) => {
     const today = new Date(endDate);
@@ -69,7 +62,7 @@ export default function HomeView() {
         const currentMonth = now.getMonth();
         const currentYear = now.getFullYear();
         const monthlyFinances = allFinances.filter(transaction => {
-            const date = new Date(transaction.date);
+            const date = new Date(`${String(transaction.date || '').slice(0, 10)}T00:00:00`);
             return date.getMonth() === currentMonth && date.getFullYear() === currentYear;
         });
         const financeTotals = getStatementTotals(monthlyFinances);
@@ -78,7 +71,19 @@ export default function HomeView() {
 
         return {
             tasks: filteredTasks,
-            finances: { income: inc, expense: exp, net: inc - exp },
+            finances: {
+                income: inc,
+                expense: exp,
+                net: inc - exp,
+                expensesByCategory: financeTotals.spendingByCategory,
+                recentTransactions: monthlyFinances
+                    .filter(transaction => !transaction.monthlyEstimate)
+                    .sort((a, b) => (
+                        String(b.date || '').localeCompare(String(a.date || ''))
+                        || String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+                    ))
+                    .slice(0, 3),
+            },
             recentActivity: getRecentActivity(allTasks)
         };
     }, [todayStr]);
@@ -193,15 +198,36 @@ export default function HomeView() {
         };
     });
 
-    // Chart.js Configuration
-    const chartData = {
-        labels: ['Income', 'Expense'],
-        datasets: [{
-            data: [finances.income, finances.expense],
-            backgroundColor: ['#10b981', '#ef4444'],
-            borderWidth: 0,
-            hoverOffset: 4
-        }]
+    const expenseCategories = Object.entries(finances.expensesByCategory || {})
+        .sort((a, b) => b[1] - a[1]);
+    const visibleExpenseCategories = expenseCategories.length > 4
+        ? [
+            ...expenseCategories.slice(0, 3),
+            [
+                expenseCategories.slice(0, 3).some(([category]) => category.toLowerCase() === 'other')
+                    ? 'Other categories'
+                    : 'Other',
+                expenseCategories.slice(3).reduce((total, [, amount]) => total + amount, 0),
+            ],
+        ]
+        : expenseCategories;
+    const maxCategoryAmount = Math.max(...visibleExpenseCategories.map(([, amount]) => amount), 0);
+    const spendingPercent = finances.income > 0
+        ? Math.round((finances.expense / finances.income) * 100)
+        : 0;
+    const formatFinanceAmount = (value) => Number(value || 0).toLocaleString('en-IN', {
+        maximumFractionDigits: 2,
+    });
+    const formatTransactionDate = (dateValue) => {
+        const transactionDate = new Date(`${String(dateValue || '').slice(0, 10)}T00:00:00`);
+        if (!Number.isFinite(transactionDate.getTime())) return '';
+        const today = new Date();
+        const isToday = transactionDate.toDateString() === today.toDateString();
+        const isCurrentMonth = transactionDate.getMonth() === today.getMonth()
+            && transactionDate.getFullYear() === today.getFullYear();
+        if (isToday) return 'Today';
+        if (isCurrentMonth) return transactionDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        return transactionDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
     };
 
     return (
@@ -347,50 +373,94 @@ export default function HomeView() {
                         </div>
                     </div>
                 </div>
-                <div className="home-section-card">
+                <div className="home-section-card home-finance-preview">
                     <div className="home-section-header">
                         <div className="home-section-title-wrap">
-                            <Wallet size={18} className="home-section-icon" />
-                            <h3>Monthly Financial Health</h3>
+                            <span className="home-finance-preview-icon"><Wallet size={19} /></span>
+                            <div className="home-finance-heading-copy">
+                                <h3>Finance</h3>
+                                <p>Track spending, plan budgets, and grow savings.</p>
+                            </div>
                         </div>
-                        <NavLink to="/analytics" className="home-action-pill">View analytics <ChevronRight size={14} /></NavLink>
+                        <NavLink to="/finance" className="home-finance-preview-link">Preview</NavLink>
                     </div>
-                    <div className="home-finance-cards-grid">
-                        <div className="home-stat-card income">
-                            <div className="home-stat-icon-wrap"><ArrowDownLeft size={20} color="#10b981" /></div>
-                            <div className="home-stat-info">
-                                <span className="home-stat-label">Income</span>
-                                <strong className="home-stat-val income">+₹{formatAmount(finances.income)}</strong>
-                            </div>
+                    <div className="home-finance-summary">
+                        <div className="home-finance-summary-item">
+                            <span>Income</span>
+                            <strong className="income">₹{formatFinanceAmount(finances.income)}</strong>
                         </div>
-                        <div className="home-stat-card expense">
-                            <div className="home-stat-icon-wrap"><ArrowUpRight size={20} color="#ef4444" /></div>
-                            <div className="home-stat-info">
-                                <span className="home-stat-label">Spent</span>
-                                <strong className="home-stat-val expense">-₹{formatAmount(finances.expense)}</strong>
-                            </div>
-                        </div>
-                        <div className="home-stat-card net">
-                            <div className="home-stat-icon-wrap"><TrendingUp size={20} color="#3b82f6" /></div>
-                            <div className="home-stat-info">
-                                <span className="home-stat-label">Net Balance</span>
-                                <strong className={`home-stat-val ${finances.net >= 0 ? 'income' : 'expense'}`}>
-                                    {finances.net >= 0 ? '+' : ''}₹{formatAmount(finances.net)}
-                                </strong>
-                            </div>
+                        <div className="home-finance-summary-item">
+                            <span>Expenses</span>
+                            <strong className="expense">₹{formatFinanceAmount(finances.expense)}</strong>
                         </div>
                     </div>
-                    {(finances.income > 0 || finances.expense > 0) && (
-                        <div className="home-doughnut-wrap">
-                            <div className="home-chart-container">
-                                <Doughnut data={chartData} options={{ cutout: '76%', plugins: { legend: { display: false } }, maintainAspectRatio: false }} />
-                                <div className="home-chart-center-label">
-                                    <span className="home-chart-sub">Net Savings</span>
-                                    <strong className={finances.net >= 0 ? 'text-success' : 'text-danger'}>₹{formatAmount(finances.net)}</strong>
-                                </div>
-                            </div>
+                    <section className="home-finance-spending" aria-label="Monthly spending compared with income">
+                        <div className="home-finance-subheading">
+                            <h4>Monthly spending</h4>
+                            <span>{finances.income > 0 ? `${spendingPercent}% of income` : 'No income recorded'}</span>
                         </div>
-                    )}
+                        <div className="home-finance-spending-caption">
+                            <span>
+                                ₹{formatFinanceAmount(finances.expense)} spent
+                                {finances.income > 0 && ` of ₹${formatFinanceAmount(finances.income)} income`}
+                            </span>
+                            <strong>{finances.income > 0 ? `${spendingPercent}%` : '—'}</strong>
+                        </div>
+                        <div className="home-finance-progress" aria-hidden="true">
+                            <span style={{ width: `${Math.min(spendingPercent, 100)}%` }} />
+                        </div>
+                    </section>
+                    <section className="home-finance-breakdown">
+                        <h4>Spending breakdown</h4>
+                        {visibleExpenseCategories.length > 0 ? (
+                            <ul>
+                                {visibleExpenseCategories.map(([category, amount]) => (
+                                    <li key={category}>
+                                        <div className="home-finance-category-label">
+                                            <span>{category}</span>
+                                            <strong>₹{formatFinanceAmount(amount)}</strong>
+                                        </div>
+                                        <div className="home-finance-category-track" aria-hidden="true">
+                                            <span style={{ width: `${maxCategoryAmount ? (amount / maxCategoryAmount) * 100 : 0}%` }} />
+                                        </div>
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : (
+                            <p className="home-finance-empty">No spending recorded this month.</p>
+                        )}
+                    </section>
+                    <section className="home-finance-recent">
+                        <div className="home-finance-recent-heading">
+                            <h4>Recent transactions</h4>
+                            <NavLink to="/finance">View all</NavLink>
+                        </div>
+                        {finances.recentTransactions.length > 0 ? (
+                            <ul>
+                                {finances.recentTransactions.map((transaction, index) => {
+                                    const transactionTitle = transaction.name || transaction.desc || 'Transaction';
+                                    const transactionCategory = transaction.desc || (transaction.type === 'income' ? 'Income' : 'Expense');
+                                    const isIncome = transaction.type === 'income';
+                                    return (
+                                        <li key={transaction.id || `${transaction.date}-${transactionTitle}-${index}`}>
+                                            <span className={`home-finance-transaction-icon ${isIncome ? 'income' : ''}`}>
+                                                <Wallet size={17} aria-hidden="true" />
+                                            </span>
+                                            <span className="home-finance-transaction-copy">
+                                                <strong>{transactionTitle}</strong>
+                                                <small>{transactionCategory} · {formatTransactionDate(transaction.date)}</small>
+                                            </span>
+                                            <strong className={`home-finance-transaction-amount ${isIncome ? 'income' : ''}`}>
+                                                {isIncome ? '+' : '−'}₹{formatFinanceAmount(Math.abs(Number(transaction.amount) || 0))}
+                                            </strong>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        ) : (
+                            <p className="home-finance-empty">No transactions recorded this month.</p>
+                        )}
+                    </section>
                 </div>
             </div>
         </div>

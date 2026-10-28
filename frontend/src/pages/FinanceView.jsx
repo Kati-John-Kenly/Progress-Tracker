@@ -6,6 +6,8 @@ import {
     ArrowUpRight,
     Wallet,
     TrendingUp,
+    TrendingDown,
+    PiggyBank,
     ChevronLeft,
     ChevronRight,
     Plus,
@@ -31,6 +33,7 @@ import {
     setStoredFinanceCategories,
 } from '../utils/workspaceEvents';
 import { getStatementTotals } from '../utils/statementImport';
+import { getStatementFileFingerprint } from '../utils/statementFingerprint';
 import { parseStatementFile } from '../utils/statementFileParser';
 import { formatAmount } from '../utils/numberFormat';
 import { filterFinanceTransactions } from '../utils/financeSearch';
@@ -126,6 +129,41 @@ export default function FinanceView({ initialTab = 'transactions' }) {
         return unsubscribe;
     }, []);
 
+    useEffect(() => {
+        if (!expandedCalendarDay) return undefined;
+
+        const isPopoverTarget = (target) => (
+            target instanceof Element && Boolean(target.closest('.calendar-transaction-popover'))
+        );
+        const dismissPopover = () => {
+            if (longPressTimerRef.current) {
+                clearTimeout(longPressTimerRef.current);
+                longPressTimerRef.current = null;
+            }
+            setExpandedCalendarDay(null);
+        };
+        const handlePointerDown = (event) => {
+            if (isPopoverTarget(event.target)) return;
+            if (event.target instanceof Element && event.target.closest('.cal-day.active-day')) return;
+            dismissPopover();
+        };
+        const handleOutsideTouchMove = (event) => {
+            if (!isPopoverTarget(event.target)) dismissPopover();
+        };
+        const handleOutsideScroll = (event) => {
+            if (!isPopoverTarget(event.target)) dismissPopover();
+        };
+
+        document.addEventListener('pointerdown', handlePointerDown, true);
+        document.addEventListener('touchmove', handleOutsideTouchMove, { capture: true, passive: true });
+        document.addEventListener('scroll', handleOutsideScroll, true);
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown, true);
+            document.removeEventListener('touchmove', handleOutsideTouchMove, true);
+            document.removeEventListener('scroll', handleOutsideScroll, true);
+        };
+    }, [expandedCalendarDay]);
+
     // Active Month Navigation
     const currentMonth = viewDate.getMonth();
     const currentYear = viewDate.getFullYear();
@@ -174,9 +212,11 @@ export default function FinanceView({ initialTab = 'transactions' }) {
     const expenseTotals = transactionTotals.spendingByCategory;
 
     const netSavings = Number((totalIncome - totalExpense).toFixed(2));
-    const savingsRatio = totalIncome > 0
-        ? Math.max(0, Math.min(100, Math.round((netSavings / totalIncome) * 100)))
-        : 0;
+    const allTimeTotals = getStatementTotals(financeData);
+    const totalBalance = Number((allTimeTotals.income - allTimeTotals.spending).toFixed(2));
+    const formatSummaryAmount = (value) => Number(value).toLocaleString('en-IN', {
+        maximumFractionDigits: 2,
+    });
 
     // Chart.js Data
     const incomeColors = ['#10b981', '#059669', '#34d399', '#6ee7b7', '#14b8a6'];
@@ -294,13 +334,28 @@ export default function FinanceView({ initialTab = 'transactions' }) {
         setIsImportingStatement(true);
         setStatementMessage(null);
         try {
+            const fileFingerprint = await getStatementFileFingerprint(file);
+            const currentFinance = getStoredFinances();
+            const hasAlreadyUploaded = currentFinance.some(transaction => (
+                transaction.source === 'statement'
+                && transaction.statementFileFingerprint === fileFingerprint
+            ));
+            if (hasAlreadyUploaded) {
+                setStatementMessage({
+                    type: 'error',
+                    text: 'This statement file has already been uploaded. Upload a different file to merge additional transactions.',
+                });
+                return;
+            }
+
             const result = await parseStatementFile(file, { customCategories });
             const importedTransactions = result.transactions.map((transaction, index) => ({
                 ...transaction,
                 id: globalThis.crypto?.randomUUID?.() || `statement-${Date.now()}-${index}`,
                 createdAt: new Date().toISOString(),
+                statementFileFingerprint: fileFingerprint,
             }));
-            const updatedFinance = [...importedTransactions, ...financeData];
+            const updatedFinance = [...importedTransactions, ...currentFinance];
 
             setStoredFinances(updatedFinance);
             setFinanceData(updatedFinance);
@@ -384,6 +439,57 @@ export default function FinanceView({ initialTab = 'transactions' }) {
         ...customCategories
     ];
 
+    const mostUsedCategories = useMemo(() => {
+        const categoryUsage = new Map();
+        financeData.forEach(transaction => {
+            const name = String(transaction.desc || '').trim();
+            if (transaction.type !== finType || !name || transaction.monthlyEstimate) return;
+
+            const key = name.toLowerCase();
+            const usage = categoryUsage.get(key) || { name, count: 0, lastUsed: 0 };
+            usage.count += 1;
+            usage.lastUsed = Math.max(
+                usage.lastUsed,
+                Date.parse(transaction.createdAt || transaction.date) || 0,
+            );
+            categoryUsage.set(key, usage);
+        });
+
+        const usedCategories = [...categoryUsage.values()]
+            .sort((a, b) => b.count - a.count || b.lastUsed - a.lastUsed)
+            .slice(0, 5);
+        if (usedCategories.length > 0) return usedCategories.map(({ name }) => name);
+
+        return DEFAULT_PRESET_CATEGORIES
+            .filter(categoryPreset => categoryPreset.type === finType)
+            .map(categoryPreset => categoryPreset.name);
+    }, [financeData, finType]);
+
+    const getPreviousCategoryAmount = (categoryName, type = finType) => {
+        const normalizedCategory = String(categoryName || '').trim().toLowerCase();
+        if (!normalizedCategory || normalizedCategory === 'add_new_cat') return '';
+
+        const previousTransaction = financeData
+            .filter(transaction => (
+                transaction.type === type
+                && String(transaction.desc || '').trim().toLowerCase() === normalizedCategory
+                && Number.isFinite(Number(transaction.amount))
+                && Number(transaction.amount) > 0
+            ))
+            .sort((a, b) => {
+                const aTimestamp = Date.parse(a.createdAt || a.date) || 0;
+                const bTimestamp = Date.parse(b.createdAt || b.date) || 0;
+                return bTimestamp - aTimestamp;
+            })[0];
+
+        return previousTransaction ? String(previousTransaction.amount) : '';
+    };
+
+    const openAddTransactionModal = () => {
+        setAmount(getPreviousCategoryAmount(category, finType));
+        setShowAddModal(true);
+    };
+
     // Calendar Renderer
     const renderCalendar = () => {
         const firstDay = new Date(currentYear, currentMonth, 1).getDay();
@@ -410,9 +516,10 @@ export default function FinanceView({ initialTab = 'transactions' }) {
             const hasActivity = dayTransactions.length > 0;
             const isToday = dateStr === new Date().toISOString().split('T')[0];
             const isExpanded = expandedCalendarDay === dateStr;
-            const dayPositionClass = i % 7 === 1
+            const column = (firstDay + i - 1) % 7;
+            const dayPositionClass = column <= 1
                 ? 'calendar-popover-start'
-                : i % 7 === 0
+                : column >= 5
                     ? 'calendar-popover-end'
                     : '';
 
@@ -503,65 +610,56 @@ export default function FinanceView({ initialTab = 'transactions' }) {
 
             </div>
 
-            {/* HERO BANNER: MONTHLY FINANCIAL CONSISTENCY (ROUTINE PROGRESS BANNER STYLE) */}
-            <div
-                className="routine-progress-banner finance-hero-banner"
-                role="button"
-                tabIndex={0}
-                aria-haspopup="dialog"
-                aria-expanded={showFinanceDetails}
-                onClick={() => setShowFinanceDetails(true)}
-                onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        setShowFinanceDetails(true);
-                    }
-                }}
-            >
-                <div className="routine-progress-left">
-                    <div className="routine-progress-circle-wrap">
-                        <svg className="routine-progress-svg" viewBox="0 0 44 44">
-                            <circle
-                                className="routine-progress-bg-circle"
-                                cx="22"
-                                cy="22"
-                                r="18"
-                            />
-                            <circle
-                                className="routine-progress-bar-circle finance-bar"
-                                cx="22"
-                                cy="22"
-                                r="18"
-                                strokeDasharray={113}
-                                strokeDashoffset={113 - (113 * savingsRatio) / 100}
-                            />
-                        </svg>
-                        <div className="routine-progress-inner-text">
-                            <span className="routine-progress-number">{savingsRatio}%</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="routine-progress-center">
-                    <h3>
-                        {totalIncome === 0 && totalExpense === 0
-                            ? "No transactions this month"
-                            : `Income: ₹${formatAmount(totalIncome)} • Spent: ₹${formatAmount(totalExpense)}`}
-                    </h3>
-                    <p>
-                        {totalIncome === 0 && totalExpense === 0
-                            ? "Start logging your income and daily spending."
-                            : netSavings >= 0
-                            ? `Great discipline! You have a positive balance of +₹${formatAmount(netSavings)} (${savingsRatio}% saved).`
-                            : `Spending exceeds income by ₹${formatAmount(Math.abs(netSavings))}. Review allocations below.`}
-                    </p>
-                </div>
-
-                <div className="routine-progress-streak-tag finance-net-tag">
-                    <Wallet size={14} color="#3b82f6" />
-                    <span>{netSavings >= 0 ? '+' : ''}₹{formatAmount(netSavings)} Net</span>
-                </div>
-            </div>
+            <section className="finance-summary-grid" aria-label="Financial summary">
+                <button
+                    type="button"
+                    className="finance-summary-card balance"
+                    onClick={() => setShowFinanceDetails(true)}
+                    aria-haspopup="dialog"
+                    aria-expanded={showFinanceDetails}
+                >
+                    <Wallet className="finance-summary-icon" size={20} aria-hidden="true" />
+                    <span className="finance-summary-label">Total Balance</span>
+                    <strong>{totalBalance < 0 ? '-₹' : '₹'}{formatSummaryAmount(Math.abs(totalBalance))}</strong>
+                    <span className="finance-summary-caption">Across all recorded transactions</span>
+                </button>
+                <button
+                    type="button"
+                    className="finance-summary-card income"
+                    onClick={() => setShowFinanceDetails(true)}
+                    aria-haspopup="dialog"
+                    aria-expanded={showFinanceDetails}
+                >
+                    <TrendingUp className="finance-summary-icon" size={20} aria-hidden="true" />
+                    <span className="finance-summary-label">Monthly Income</span>
+                    <strong>₹{formatSummaryAmount(totalIncome)}</strong>
+                    <span className="finance-summary-caption">Current month</span>
+                </button>
+                <button
+                    type="button"
+                    className="finance-summary-card expenses"
+                    onClick={() => setShowFinanceDetails(true)}
+                    aria-haspopup="dialog"
+                    aria-expanded={showFinanceDetails}
+                >
+                    <TrendingDown className="finance-summary-icon" size={20} aria-hidden="true" />
+                    <span className="finance-summary-label">Monthly Expenses</span>
+                    <strong>₹{formatSummaryAmount(totalExpense)}</strong>
+                    <span className="finance-summary-caption">Current month</span>
+                </button>
+                <button
+                    type="button"
+                    className="finance-summary-card net"
+                    onClick={() => setShowFinanceDetails(true)}
+                    aria-haspopup="dialog"
+                    aria-expanded={showFinanceDetails}
+                >
+                    <PiggyBank className="finance-summary-icon" size={20} aria-hidden="true" />
+                    <span className="finance-summary-label">Net Cash Flow</span>
+                    <strong>{netSavings >= 0 ? '+' : '-'}₹{formatSummaryAmount(Math.abs(netSavings))}</strong>
+                    <span className="finance-summary-caption">Income − expenses</span>
+                </button>
+            </section>
 
             {showFinanceDetails && (
                 <div className="routine-modal-overlay" onClick={() => setShowFinanceDetails(false)}>
@@ -648,19 +746,9 @@ export default function FinanceView({ initialTab = 'transactions' }) {
                             <Upload size={18} />
                             <span>{isImportingStatement ? 'Processing statement…' : 'Upload a statement'}</span>
                         </button>
-                        {statementTransactionCount > 0 && (
-                            <button
-                                type="button"
-                                onClick={handleClearStatementTransactions}
-                                className="routine-add-main-btn finance-clear-statement-btn"
-                            >
-                                <Trash2 size={18} />
-                                <span>Clear uploaded transactions ({statementTransactionCount})</span>
-                            </button>
-                        )}
                         <button
                             type="button"
-                            onClick={() => setShowAddModal(true)}
+                            onClick={openAddTransactionModal}
                             className="routine-add-main-btn"
                         >
                             <Plus size={18} />
@@ -772,6 +860,16 @@ export default function FinanceView({ initialTab = 'transactions' }) {
                             </button>
                         )}
                     </label>
+                    {statementTransactionCount > 0 && (
+                        <button
+                            type="button"
+                            onClick={handleClearStatementTransactions}
+                            className="routine-add-main-btn finance-clear-statement-btn"
+                        >
+                            <Trash2 size={18} />
+                            <span>Clear uploaded transactions ({statementTransactionCount})</span>
+                        </button>
+                    )}
 
                     {/* TRANSACTIONS CARDS LIST (ROUTINE TASK CARD DESIGN TYPE) */}
                     <div className="routine-tasks-list">
@@ -797,7 +895,7 @@ export default function FinanceView({ initialTab = 'transactions' }) {
                                 ) : (
                                     <button
                                         type="button"
-                                        onClick={() => setShowAddModal(true)}
+                                        onClick={openAddTransactionModal}
                                         className="routine-template-btn work"
                                         style={{ margin: '12px auto 0' }}
                                     >
@@ -989,6 +1087,7 @@ export default function FinanceView({ initialTab = 'transactions' }) {
                                 onClick={() => {
                                     setFinType('expense');
                                     setCategory('Groceries');
+                                    setAmount(getPreviousCategoryAmount('Groceries', 'expense'));
                                 }}
                             >
                                 <ArrowUpRight size={15} /> Expense
@@ -999,6 +1098,7 @@ export default function FinanceView({ initialTab = 'transactions' }) {
                                 onClick={() => {
                                     setFinType('income');
                                     setCategory('Salary');
+                                    setAmount(getPreviousCategoryAmount('Salary', 'income'));
                                 }}
                             >
                                 <ArrowDownLeft size={15} /> Income
@@ -1007,18 +1107,19 @@ export default function FinanceView({ initialTab = 'transactions' }) {
 
                         {/* QUICK PRESET CHIPS */}
                         <div className="routine-presets-wrap">
-                            <span className="routine-presets-label">Quick Categories:</span>
+                            <span className="routine-presets-label">Most used categories:</span>
                             <div className="routine-presets-row">
-                                {DEFAULT_PRESET_CATEGORIES
-                                    .filter(c => c.type === finType)
-                                    .map(c => (
+                                {mostUsedCategories.map(categoryName => (
                                         <button
-                                            key={c.name}
+                                            key={categoryName}
                                             type="button"
-                                            onClick={() => setCategory(c.name)}
-                                            className={`routine-preset-chip ${category === c.name ? 'active' : ''}`}
+                                            onClick={() => {
+                                                setCategory(categoryName);
+                                                setAmount(getPreviousCategoryAmount(categoryName, finType));
+                                            }}
+                                            className={`routine-preset-chip ${category === categoryName ? 'active' : ''}`}
                                         >
-                                            {c.name}
+                                            {categoryName}
                                         </button>
                                     ))}
                             </div>
@@ -1044,7 +1145,11 @@ export default function FinanceView({ initialTab = 'transactions' }) {
                                 <label>Category</label>
                                 <select
                                     value={category}
-                                    onChange={(e) => setCategory(e.target.value)}
+                                    onChange={(e) => {
+                                        const selectedCategory = e.target.value;
+                                        setCategory(selectedCategory);
+                                        setAmount(getPreviousCategoryAmount(selectedCategory, finType));
+                                    }}
                                     className="routine-input-text"
                                     required
                                 >
@@ -1061,7 +1166,10 @@ export default function FinanceView({ initialTab = 'transactions' }) {
                                     <input
                                         type="text"
                                         value={newCategory}
-                                        onChange={(e) => setNewCategory(e.target.value)}
+                                        onChange={(e) => {
+                                            setNewCategory(e.target.value);
+                                            setAmount(getPreviousCategoryAmount(e.target.value, finType));
+                                        }}
                                         placeholder="e.g. Pet Care, Gadgets"
                                         required
                                         className="routine-input-text"
