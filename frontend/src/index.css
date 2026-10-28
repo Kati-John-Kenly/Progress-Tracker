@@ -2880,8 +2880,12 @@ body.light-theme .ios-backup-btn:hover {
     border: 1px solid var(--border);
     border-radius: 20px;
     width: min(100%, 420px);
+    max-width: calc(100vw - 28px);
+    max-height: calc(100dvh - 40px);
+    overflow-y: auto;
     padding: 20px;
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+    box-sizing: border-box;
 }
 
 body.light-theme .ios-modal-box {
