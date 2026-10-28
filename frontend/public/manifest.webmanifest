@@ -5,7 +5,11 @@
   "description": "A personal productivity and habit tracker.",
   "start_url": "/",
   "scope": "/",
-  "display": "standalone",
+  "display_override": [
+    "fullscreen",
+    "standalone"
+  ],
+  "display": "fullscreen",
   "background_color": "#111827",
   "theme_color": "#111827",
   "icons": [

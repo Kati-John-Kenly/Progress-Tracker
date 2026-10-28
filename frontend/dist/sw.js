@@ -1,4 +1,4 @@
-const buildId = 'mvryvocp';
+const buildId = 'mvrzbf2r';
 const cacheName = `progress-app-${buildId}`;
 const precacheUrls = JSON.parse('["/","/index.html","/manifest.webmanifest","/pwa-icon.png","/favicon.png","/assets/index-DB6a9qas.js","/assets/pdf-B21G9UOt.js","/assets/xlsx-CuSbHU4R.js","/assets/index-D43wkTtX.css","/assets/pdf.worker.min-CjEcRF4W.mjs"]');
 
