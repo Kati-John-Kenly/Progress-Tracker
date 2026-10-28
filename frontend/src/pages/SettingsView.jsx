@@ -8,10 +8,6 @@ import {
     Moon,
     Bell,
     Globe,
-    Smile,
-    Smartphone,
-    KeyRound,
-    ArrowLeftRight,
     HardDrive,
     Info,
     ShieldCheck,
@@ -43,18 +39,6 @@ import {
     saveStoredAccount
 } from '../utils/workspaceEvents';
 import { canInstallProgressApp, promptInstallProgressApp } from '../utils/appInstall';
-import {
-    hasSavedDeviceBiometric,
-    registerDeviceBiometric,
-    removeDeviceBiometric,
-    verifyDeviceBiometric
-} from '../utils/deviceBiometrics';
-import {
-    isLocalPasscodeConfigured,
-    removeLocalPasscode,
-    saveLocalPasscode,
-    verifyLocalPasscode
-} from '../utils/localPasscode';
 import {
     getCustomGeminiApiKey,
     setCustomGeminiApiKey,
@@ -196,16 +180,6 @@ export default function SettingsView() {
     const [theme, setTheme] = useState(() => getStoredTheme());
     const [notifications, setNotifications] = useState(() => localStorage.getItem('appNotifications') !== 'false');
     const [language, setLanguage] = useState(() => localStorage.getItem('appLanguage') || 'English (US)');
-
-    // Security options (Image 2)
-    const [faceId, setFaceId] = useState(() => (
-        localStorage.getItem('appFaceId') === 'true' && hasSavedDeviceBiometric()
-    ));
-    const [passcode, setPasscode] = useState(() => isLocalPasscodeConfigured());
-    const [txConfirmation, setTxConfirmation] = useState(() => localStorage.getItem('appTxConfirm') !== 'false');
-    const [securityMessage, setSecurityMessage] = useState('');
-    const [securityError, setSecurityError] = useState(false);
-    const [passcodeError, setPasscodeError] = useState('');
 
     // Storage calculation (Image 1)
     const [storageInfo, setStorageInfo] = useState({ percent: 12, usedText: '620KB', quotaText: '5.0MB' });
@@ -436,12 +410,9 @@ export default function SettingsView() {
         setAuthError('');
     };
 
-    // Modals state: null | 'language' | 'passcode' | 'devices' | 'about' | 'privacy' | 'auth_modal'
+    // Modals state: null | 'language' | 'about' | 'privacy' | 'auth_modal'
     const [activeModal, setActiveModal] = useState(null);
     const [shareStatus, setShareStatus] = useState('');
-    const [currentPin, setCurrentPin] = useState('');
-    const [tempPin, setTempPin] = useState('');
-    const [confirmPin, setConfirmPin] = useState('');
     // Backup state
     const [backupFile, setBackupFile] = useState(null);
     const [backupMessage, setBackupMessage] = useState('');
@@ -505,7 +476,7 @@ export default function SettingsView() {
         } catch {
             setStorageInfo({ percent: 25, usedText: '1.2MB', quotaText: '5.0MB' });
         }
-    }, [theme, notifications, language, faceId, passcode]);
+    }, [theme, notifications, language]);
 
     // Handlers
     const toggleTheme = (isLight) => {
@@ -619,51 +590,6 @@ export default function SettingsView() {
         localStorage.setItem('appNotifications', val ? 'true' : 'false');
     };
 
-    const toggleFaceId = async (val) => {
-        setSecurityMessage('');
-        setSecurityError(false);
-        if (!val) {
-            removeDeviceBiometric();
-            localStorage.setItem('appFaceId', 'false');
-            setFaceId(false);
-            setSecurityMessage('Biometric unlock has been turned off.');
-            return;
-        }
-        if (!passcode) {
-            setSecurityError(true);
-            setSecurityMessage('Set a passcode first so you can still unlock if biometric verification is unavailable.');
-            return;
-        }
-        try {
-            await registerDeviceBiometric('Progress user');
-            localStorage.setItem('appFaceId', 'true');
-            setFaceId(true);
-            setSecurityMessage('Biometric unlock is enabled. Your device will use Face ID, fingerprint, or its supported screen lock.');
-        } catch (error) {
-            if (error.name !== 'NotAllowedError') {
-                setSecurityError(true);
-                setSecurityMessage(error.message || 'Could not set up biometric unlock on this device.');
-            }
-        }
-    };
-
-    const handleTestBiometric = async () => {
-        setSecurityMessage('');
-        setSecurityError(false);
-        try {
-            await verifyDeviceBiometric();
-            setSecurityMessage('Biometric verification succeeded.');
-        } catch (error) {
-            setSecurityError(true);
-            setSecurityMessage(error.message || 'Biometric verification failed.');
-        }
-    };
-
-    const toggleTxConfirmation = (val) => {
-        setTxConfirmation(val);
-        localStorage.setItem('appTxConfirm', val ? 'true' : 'false');
-    };
-
     const shareUrl = new URL('/', window.location.origin).href;
     const shareText = 'Check out Progress Tracker — a personal routine, habit, and finance tracker.';
     const encodedShareUrl = encodeURIComponent(shareUrl);
@@ -696,55 +622,6 @@ export default function SettingsView() {
     const handleSelectLanguage = (lang) => {
         setLanguage(lang);
         localStorage.setItem('appLanguage', lang);
-        setActiveModal(null);
-    };
-
-    const handleSavePasscode = async (e) => {
-        e.preventDefault();
-        setPasscodeError('');
-        if (passcode) {
-            try {
-                if (!(await verifyLocalPasscode(currentPin))) {
-                    setPasscodeError('The current passcode is incorrect.');
-                    return;
-                }
-            } catch (error) {
-                setPasscodeError(error.message || 'Could not verify the current passcode.');
-                return;
-            }
-        }
-        if (tempPin.length !== 4 || confirmPin !== tempPin) {
-            setPasscodeError('Enter a 4-digit passcode and confirm it correctly.');
-            return;
-        }
-        try {
-            await saveLocalPasscode(tempPin);
-            setPasscode(true);
-            setCurrentPin('');
-            setTempPin('');
-            setConfirmPin('');
-            setActiveModal(null);
-        } catch (error) {
-            setPasscodeError(error.message || 'Could not save the passcode.');
-        }
-    };
-
-    const handleRemovePasscode = async () => {
-        setPasscodeError('');
-        try {
-            if (!(await verifyLocalPasscode(currentPin))) {
-                setPasscodeError('The current passcode is incorrect.');
-                return;
-            }
-        } catch (error) {
-            setPasscodeError(error.message || 'Could not verify the current passcode.');
-            return;
-        }
-        removeLocalPasscode();
-        setPasscode(false);
-        setCurrentPin('');
-        setTempPin('');
-        setConfirmPin('');
         setActiveModal(null);
     };
 
@@ -951,112 +828,6 @@ export default function SettingsView() {
                             <ChevronRight size={17} className="ios-chevron" />
                         </div>
                     </button>
-                </section>
-
-                {/* SECTION 2: SECURITY (IMAGE 2 OPTIONS INSIDE IMAGE 1 CARD) */}
-                <div className="ios-section-label">Security</div>
-                <section className="ios-card ios-card-grouped">
-                    {/* Device biometric unlock (Face ID or fingerprint, depending on the device) */}
-                    <div className="ios-row">
-                        <div className="ios-row-left">
-                            <span className="ios-icon-box face-id-icon">
-                                <Smile size={18} />
-                            </span>
-                            <div className="ios-row-text">
-                                <span className="ios-row-title">Biometric Unlock</span>
-                            </div>
-                        </div>
-                        <div className="ios-row-right">
-                            {faceId && (
-                                <button type="button" className="ios-biometric-test-btn" onClick={handleTestBiometric}>
-                                    Verify
-                                </button>
-                            )}
-                            <IOSSwitch
-                                id="toggle-face-id"
-                                checked={faceId}
-                                onChange={toggleFaceId}
-                                activeColor="#22c55e"
-                                ariaLabel="Toggle biometric unlock using Face ID or fingerprint"
-                            />
-                        </div>
-                    </div>
-                    <p className={`ios-security-message ${securityError ? 'error' : ''}`} role="status">
-                        {securityMessage || 'Uses your device biometrics (Face ID or fingerprint). Set a passcode first for recovery.'}
-                    </p>
-
-                    <div className="ios-divider" />
-
-                    {/* Linked Devices (Image 2) */}
-                    <button
-                        type="button"
-                        onClick={() => setActiveModal('devices')}
-                        className="ios-row ios-row-btn"
-                    >
-                        <div className="ios-row-left">
-                            <span className="ios-icon-box phone-icon">
-                                <Smartphone size={18} />
-                            </span>
-                            <div className="ios-row-text">
-                                <span className="ios-row-title">Linked Devices</span>
-                            </div>
-                        </div>
-                        <div className="ios-row-right">
-                            <span className="ios-row-value">1 Active</span>
-                            <ChevronRight size={17} className="ios-chevron" />
-                        </div>
-                    </button>
-
-                    <div className="ios-divider" />
-
-                    {/* Passcode (Image 2) */}
-                    <button
-                        type="button"
-                        onClick={() => {
-                            setCurrentPin('');
-                            setTempPin('');
-                            setConfirmPin('');
-                            setPasscodeError('');
-                            setActiveModal('passcode');
-                        }}
-                        className="ios-row ios-row-btn"
-                    >
-                        <div className="ios-row-left">
-                            <span className="ios-icon-box key-icon">
-                                <KeyRound size={18} />
-                            </span>
-                            <div className="ios-row-text">
-                                <span className="ios-row-title">Passcode</span>
-                            </div>
-                        </div>
-                        <div className="ios-row-right">
-                            <span className="ios-row-value">{passcode ? 'Enabled' : 'Not set'}</span>
-                            <ChevronRight size={17} className="ios-chevron" />
-                        </div>
-                    </button>
-
-                    <div className="ios-divider" />
-
-                    {/* Transaction Confirmation (Image 2) */}
-                    <div className="ios-row">
-                        <div className="ios-row-left">
-                            <span className="ios-icon-box tx-icon">
-                                <ArrowLeftRight size={18} />
-                            </span>
-                            <div className="ios-row-text">
-                                <span className="ios-row-title">Transaction Confirmation</span>
-                            </div>
-                        </div>
-                        <div className="ios-row-right">
-                            <IOSSwitch
-                                id="toggle-tx-confirm"
-                                checked={txConfirmation}
-                                onChange={toggleTxConfirmation}
-                                activeColor="#3b82f6"
-                                ariaLabel="Require confirmation for financial transactions"
-                            />
-                        </div>
-                    </div>
                 </section>
 
                 {/* SECTION 3: STORAGE & BACKUP (IMAGE 1 TEMPLATE) */}
@@ -1550,112 +1321,6 @@ export default function SettingsView() {
                                 </button>
                             ))}
                         </div>
-                    </div>
-                </div>
-            )}
-
-            {/* MODAL: PASSCODE SETUP */}
-            {activeModal === 'passcode' && (
-                <div className="ios-modal-overlay" onClick={() => setActiveModal(null)}>
-                    <div className="ios-modal-box" onClick={(e) => e.stopPropagation()}>
-                        <div className="ios-modal-header">
-                            <h3>{passcode ? 'Security Passcode' : 'Set 4-Digit Passcode'}</h3>
-                            <button type="button" onClick={() => setActiveModal(null)} className="ios-modal-close">
-                                <X size={18} />
-                            </button>
-                        </div>
-                        <form onSubmit={handleSavePasscode} className="ios-passcode-form">
-                            <p className="ios-modal-desc">
-                                {passcode
-                                    ? 'Verify your current passcode before changing or removing it.'
-                                    : 'Enter a 4-digit PIN for quick app protection.'}
-                            </p>
-                            {passcode && (
-                                <input
-                                    type="password"
-                                    inputMode="numeric"
-                                    autoComplete="current-password"
-                                    maxLength={4}
-                                    pattern="[0-9]{4}"
-                                    value={currentPin}
-                                    onChange={(e) => setCurrentPin(e.target.value.replace(/\D/g, ''))}
-                                    placeholder="Current passcode"
-                                    aria-label="Current passcode"
-                                    className="ios-passcode-input"
-                                />
-                            )}
-                            <input
-                                type="password"
-                                inputMode="numeric"
-                                autoComplete="new-password"
-                                maxLength={4}
-                                pattern="[0-9]{4}"
-                                value={tempPin}
-                                onChange={(e) => setTempPin(e.target.value.replace(/\D/g, ''))}
-                                placeholder={passcode ? 'New 4-digit passcode' : '4-digit passcode'}
-                                aria-label={passcode ? 'New passcode' : 'Passcode'}
-                                className="ios-passcode-input"
-                            />
-                            <input
-                                type="password"
-                                inputMode="numeric"
-                                autoComplete="new-password"
-                                maxLength={4}
-                                pattern="[0-9]{4}"
-                                value={confirmPin}
-                                onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ''))}
-                                placeholder="Confirm 4-digit passcode"
-                                aria-label="Confirm passcode"
-                                className="ios-passcode-input"
-                            />
-                            {passcodeError && <p className="ios-security-message error" role="alert">{passcodeError}</p>}
-                            <div className="ios-modal-btn-row">
-                                {passcode && (
-                                    <button
-                                        type="button"
-                                        onClick={handleRemovePasscode}
-                                        className="ios-btn-danger"
-                                        disabled={currentPin.length !== 4}
-                                    >
-                                        Remove PIN
-                                    </button>
-                                )}
-                                <button
-                                    type="submit"
-                                    disabled={tempPin.length !== 4}
-                                    className="ios-btn-primary"
-                                >
-                                    {passcode ? 'Update PIN' : 'Save PIN'}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* MODAL: LINKED DEVICES */}
-            {activeModal === 'devices' && (
-                <div className="ios-modal-overlay" onClick={() => setActiveModal(null)}>
-                    <div className="ios-modal-box" onClick={(e) => e.stopPropagation()}>
-                        <div className="ios-modal-header">
-                            <h3>Linked Devices</h3>
-                            <button type="button" onClick={() => setActiveModal(null)} className="ios-modal-close">
-                                <X size={18} />
-                            </button>
-                        </div>
-                        <div className="ios-device-card">
-                            <div className="ios-device-icon">
-                                <Smartphone size={24} />
-                            </div>
-                            <div className="ios-device-info">
-                                <h4>Current Session (This Device)</h4>
-                                <p>Browser: {navigator.userAgent.includes('Chrome') ? 'Chrome / WebKit' : 'Modern Browser'}</p>
-                                <span className="ios-device-active-tag">Active Now</span>
-                            </div>
-                        </div>
-                        <p className="ios-modal-desc" style={{ marginTop: '12px' }}>
-                            Your routines, habits, and finance transactions are stored locally on this device.
-                        </p>
                     </div>
                 </div>
             )}
