@@ -6273,11 +6273,56 @@ body.light-theme .finance-calendar-month-pill,
     border: 0;
 }
 
+.app-layout {
+    --sidebar-current-width: 276px;
+}
+
 .app-layout .sidebar {
-    width: 276px;
+    width: var(--sidebar-current-width);
     background: linear-gradient(180deg, #0b172b 0%, #111f37 100%);
     border-right: 1px solid rgba(148, 163, 184, 0.12);
     padding: 26px 0;
+}
+
+.app-layout.sidebar-collapsed .sidebar {
+    display: none;
+}
+
+.sidebar-toggle {
+    position: absolute;
+    top: 77px;
+    left: calc(var(--sidebar-current-width) - 40px);
+    z-index: 20;
+    display: grid;
+    width: 30px;
+    height: 28px;
+    place-items: center;
+    padding: 0;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 9px;
+    background: #111f37;
+    color: #c1ccdc;
+    cursor: pointer;
+    transition: left 0.2s ease, background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+
+.sidebar-toggle:hover {
+    border-color: rgba(96, 165, 250, 0.5);
+    background: rgba(96, 165, 250, 0.18);
+    color: #ffffff;
+}
+
+.sidebar-toggle:focus-visible {
+    outline: 2px solid #60a5fa;
+    outline-offset: 2px;
+}
+
+.app-layout.sidebar-collapsed .sidebar-toggle {
+    left: 12px;
+}
+
+.app-layout.sidebar-collapsed .top-header {
+    padding-left: 56px;
 }
 
 .app-layout .logo-area {
@@ -6320,10 +6365,31 @@ body.light-theme .finance-calendar-month-pill,
     transition: background-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
 }
 
-.app-layout .sidebar-nav .nav-tab:hover {
-    background: rgba(96, 165, 250, 0.12);
+.app-layout .sidebar-nav .nav-tab:not(.active):hover {
+    background: rgba(96, 165, 250, 0.2);
     color: #ffffff;
-    transform: translateX(2px);
+    transform: translateX(4px);
+    box-shadow: inset 3px 0 0 #60a5fa;
+}
+
+.app-layout .sidebar-nav .nav-tab.active:hover {
+    transform: translateX(4px);
+    box-shadow: inset 3px 0 0 #93c5fd, 0 6px 16px rgba(37, 99, 235, 0.2);
+}
+
+.app-layout .sidebar-nav .nav-tab:focus-visible {
+    outline: 2px solid #60a5fa;
+    outline-offset: 2px;
+}
+
+body.light-theme .app-layout .sidebar-nav .nav-tab:not(.active):hover {
+    background: rgba(37, 99, 235, 0.1);
+    color: #1d4ed8;
+    box-shadow: inset 3px 0 0 #2563eb;
+}
+
+body.light-theme .app-layout .sidebar-nav .nav-tab.active:hover {
+    box-shadow: inset 3px 0 0 #2563eb, 0 6px 16px rgba(37, 99, 235, 0.12);
 }
 
 .app-layout .sidebar-nav .nav-tab.active {

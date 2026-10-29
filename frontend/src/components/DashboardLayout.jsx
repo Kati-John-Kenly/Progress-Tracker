@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { House, ListTodo, Wallet, Settings as SettingsIcon, Sparkles, Bell, X, ChevronRight, Flame, Quote, BarChart3, Search, Smile, Lock, RefreshCw } from 'lucide-react';
+import { House, ListTodo, Wallet, Settings as SettingsIcon, Sparkles, Bell, X, ChevronRight, Flame, Quote, BarChart3, Search, Smile, Lock, RefreshCw, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import AIAssistantBot from './AIAssistantBot';
 import GeminiIcon from './GeminiIcon';
 import { subscribeWorkspaceChange, calculateStreakStats, getStoredRoutineTasks, getStoredUserProfile, setStoredUserProfile } from '../utils/workspaceEvents';
@@ -34,6 +34,7 @@ const isAppLockEnabled = () => (
 
 const DashboardLayout = () => {
     const [menuOpen, setMenuOpen] = useState(false);
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [userProfile, setUserProfile] = useState(() => getStoredUserProfile());
     const [headerSearch, setHeaderSearch] = useState('');
     const [isLocked, setIsLocked] = useState(() => isAppLockEnabled());
@@ -233,7 +234,7 @@ const DashboardLayout = () => {
         : 'linear-gradient(135deg, #3b82f6, #8b5cf6)';
 
     return (
-        <div className="app-layout">
+        <div className={`app-layout${isSidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
             {/* UPGRADED STREAK MODAL OVERLAY (LIGHT/DARK THEME CLEAN) */}
             {showStreakModal && (
                 <div className="routine-modal-overlay" onClick={() => setShowStreakModal(false)}>
@@ -449,7 +450,18 @@ const DashboardLayout = () => {
             )}
 
             {/* SIDEBAR (DESKTOP) */}
-            <aside className="sidebar">
+            <button
+                type="button"
+                className="sidebar-toggle"
+                onClick={() => setIsSidebarCollapsed(collapsed => !collapsed)}
+                aria-controls="primary-sidebar"
+                aria-expanded={!isSidebarCollapsed}
+                aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+                {isSidebarCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
+            </button>
+            <aside className="sidebar" id="primary-sidebar">
                 <div className="logo-area">
                     <img src="/favicon.png" alt="" className="main-logo" />
                     <h2><span>Progress</span><strong>Tracker</strong></h2>
