@@ -1728,6 +1728,28 @@ body.light-theme .routine-filter-chip.active {
     color: #bfdbfe;
 }
 
+body.light-theme .routine-toast-banner {
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+body.light-theme .routine-toast-banner.warning {
+    background: #fffbeb;
+    border-color: #fcd34d;
+    color: #92400e;
+}
+
+body.light-theme .routine-toast-banner.success {
+    background: #ecfdf5;
+    border-color: #a7f3d0;
+    color: #047857;
+}
+
+body.light-theme .routine-toast-banner.info {
+    background: #eff6ff;
+    border-color: #bfdbfe;
+    color: #1d4ed8;
+}
+
 .routine-toast-close {
     margin-left: auto;
     background: none;
@@ -1744,6 +1766,10 @@ body.light-theme .routine-filter-chip.active {
 .routine-toast-close:hover {
     opacity: 1;
     background: rgba(255, 255, 255, 0.1);
+}
+
+body.light-theme .routine-toast-close:hover {
+    background: rgba(15, 23, 42, 0.06);
 }
 
 .routine-status-pill {
