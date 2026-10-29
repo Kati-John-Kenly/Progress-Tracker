@@ -356,14 +356,7 @@ body.light-theme .aura-gemini-logo {
 }
 
 .aura-status-dot {
-    position: absolute;
-    bottom: -1px;
-    right: -1px;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--success, #10b981);
-    border: 1.5px solid var(--bg-card);
+    display: none !important;
 }
 
 .aura-title {
@@ -1191,72 +1184,74 @@ body.light-theme .aura-speak-btn {
 
 
 /* =========================================================
-   FULL SCREEN MOBILE RATIO FOR REAL MOBILES (NO BROWSER ARTIFACTS)
+   POP-UP MESSAGE CARD VIEW FOR MOBILE (NO FULL-SCREEN LOCK)
    ========================================================= */
 @media (max-width: 640px) {
     .aura-window:not(.minimized) {
         position: fixed !important;
-        inset: 0 !important;
-        top: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        bottom: 0 !important;
-        width: 100vw !important;
-        max-width: 100vw !important;
-        height: 100% !important;
-        height: 100dvh !important;
-        max-height: 100dvh !important;
-        border-radius: 0 !important;
-        border: none !important;
-        z-index: 10000 !important;
+        width: calc(100vw - 20px) !important;
+        max-width: 356px !important;
+        height: min(480px, calc(100dvh - 105px)) !important;
+        max-height: calc(100dvh - 105px) !important;
+        border-radius: 20px !important;
+        border: 1px solid var(--border) !important;
+        z-index: 9999 !important;
         display: flex !important;
         flex-direction: column !important;
         background: var(--bg-card) !important;
-        box-shadow: none !important;
+        box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08) !important;
         margin: 0 !important;
-        padding-top: env(safe-area-inset-top, 0px) !important;
-        padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+        overflow: hidden !important;
+        overscroll-behavior: contain !important;
     }
 
     .aura-window:not(.minimized) .aura-swipe-handle-bar {
         padding-top: 6px;
+        touch-action: none !important;
+        cursor: grab !important;
     }
 
     .aura-window:not(.minimized) .aura-header {
-        padding: 8px 14px 10px;
+        padding: 6px 12px 8px;
         border-bottom: 1px solid var(--border);
+        touch-action: none !important;
+        cursor: grab !important;
     }
 
     .aura-window:not(.minimized) .aura-messages {
         flex: 1 1 0% !important;
         min-height: 0 !important;
         height: 100% !important;
-        padding: 12px 14px !important;
+        padding: 10px 12px !important;
+        touch-action: pan-y !important;
+        overscroll-behavior: contain !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+
+    .aura-window:not(.minimized) .aura-history-view {
+        flex: 1 1 0% !important;
+        min-height: 0 !important;
+        height: 100% !important;
+        touch-action: pan-y !important;
+        overscroll-behavior: contain !important;
+        -webkit-overflow-scrolling: touch !important;
     }
 
     .aura-window:not(.minimized) .aura-input-bar {
-        padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px)) !important;
+        padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)) !important;
         border-top: 1px solid var(--border) !important;
     }
 
-    /* Floating Minimized Pill on Mobile (Locked above bottom dock) */
+    /* Floating Minimized Pill on Mobile */
     .aura-window.minimized {
         position: fixed !important;
-        bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
-        right: 16px !important;
-        left: auto !important;
-        top: auto !important;
         z-index: 9999 !important;
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
     }
 
-    /* Floating FAB Trigger on Mobile (Locked above bottom dock) */
+    /* Floating FAB Trigger on Mobile */
     .aura-fab {
         position: fixed !important;
-        bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
-        right: 16px !important;
-        left: auto !important;
-        top: auto !important;
         z-index: 9999 !important;
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
     }

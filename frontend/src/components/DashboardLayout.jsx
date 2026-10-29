@@ -1,11 +1,16 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { House, ListTodo, Wallet, Settings as SettingsIcon, Sparkles, Bell, X, ChevronRight, Flame, Quote, BarChart3, Search, Smile, Lock } from 'lucide-react';
+import { House, ListTodo, Wallet, Settings as SettingsIcon, Sparkles, Bell, X, ChevronRight, Flame, Quote, BarChart3, Search, Smile, Lock, RefreshCw } from 'lucide-react';
 import AIAssistantBot from './AIAssistantBot';
 import GeminiIcon from './GeminiIcon';
 import { subscribeWorkspaceChange, calculateStreakStats, getStoredRoutineTasks, getStoredUserProfile, setStoredUserProfile } from '../utils/workspaceEvents';
 import { hasSavedDeviceBiometric, verifyDeviceBiometric } from '../utils/deviceBiometrics';
 import { isLocalPasscodeConfigured, verifyLocalPasscode } from '../utils/localPasscode';
+import {
+    applyAvailableAppUpdate,
+    hasAvailableAppUpdate,
+    subscribeToAppUpdates
+} from '../utils/appUpdates';
 
 const DAILY_NOTIF_QUOTES = [
     "Your future is created by what you do today, not tomorrow.",
@@ -45,12 +50,16 @@ const DashboardLayout = () => {
     // In-App Notification Center State
     const [showNotificationModal, setShowNotificationModal] = useState(false);
     const [hasUnreadNotifications, setHasUnreadNotifications] = useState(() => {
+        if (hasAvailableAppUpdate()) return true;
         try {
             return sessionStorage.getItem('notif_read_session') !== 'true';
         } catch {
             return true;
         }
     });
+    const [isUpdateAvailable, setIsUpdateAvailable] = useState(() => hasAvailableAppUpdate());
+    const [isApplyingAppUpdate, setIsApplyingAppUpdate] = useState(false);
+    const [appUpdateError, setAppUpdateError] = useState('');
     const [notifQuote] = useState(() => DAILY_NOTIF_QUOTES[Math.floor(Math.random() * DAILY_NOTIF_QUOTES.length)]);
 
     // Calendar State
@@ -89,6 +98,28 @@ const DashboardLayout = () => {
             window.removeEventListener('open-streak-modal', handleOpenModal);
         };
     }, [refreshData]);
+
+    useEffect(() => subscribeToAppUpdates(() => {
+        setIsUpdateAvailable(true);
+        setHasUnreadNotifications(true);
+        try {
+            sessionStorage.removeItem('notif_read_session');
+        } catch (error) {
+            console.error('Could not update notification read state:', error);
+        }
+    }), []);
+
+    const handleApplyAppUpdate = async () => {
+        setIsApplyingAppUpdate(true);
+        setAppUpdateError('');
+        try {
+            await applyAvailableAppUpdate();
+        } catch (error) {
+            console.error('Progress update installation failed:', error);
+            setAppUpdateError(error.message || 'Could not install this update. Please try again.');
+            setIsApplyingAppUpdate(false);
+        }
+    };
 
     useEffect(() => {
         const handleVisibilityChange = () => {
@@ -290,6 +321,33 @@ const DashboardLayout = () => {
                         </div>
 
                         <div className="notification-items-list">
+                            {isUpdateAvailable && (
+                                <div className="notification-item update-notif">
+                                    <div className="notif-icon-wrap update">
+                                        <RefreshCw size={18} />
+                                    </div>
+                                    <div className="notif-content">
+                                        <div className="notif-header">
+                                            <span className="notif-category update">App Update</span>
+                                            <span className="notif-badge-pill update">New version</span>
+                                        </div>
+                                        <h4 className="notif-title">A new Progress update is ready</h4>
+                                        <p className="notif-desc">
+                                            Update now to explore the latest features. Your saved app data will be kept.
+                                        </p>
+                                        {appUpdateError && <p className="notif-update-error" role="alert">{appUpdateError}</p>}
+                                        <button
+                                            type="button"
+                                            className="notif-update-btn"
+                                            onClick={handleApplyAppUpdate}
+                                            disabled={isApplyingAppUpdate}
+                                        >
+                                            {isApplyingAppUpdate ? 'Updating…' : 'Update now'}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
                             {/* NOTIFICATION 1: TASKS AGENDA ALERT (CONVERTED FROM ALERT 2) */}
                             <div
                                 className="notification-item tasks-notif"

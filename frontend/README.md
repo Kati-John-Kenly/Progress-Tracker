@@ -1,6 +1,6 @@
 # Progress Tracker
 
-Progress Tracker is a local-first productivity and finance app. It does not require an account or sign-in. Routines, finance records, preferences, and AI conversations are stored in the browser on the current device.
+Progress Tracker is a local-first productivity and finance app. It does not require an account or sign-in. Routines, finance records, preferences, and AI conversations are stored on the current device using IndexedDB, with a 100MB app-level limit. Actual available storage can vary by browser and device.
 
 Use **Settings → Storage & Data** to download a backup and restore it on another device. Keep backup files somewhere private.
 

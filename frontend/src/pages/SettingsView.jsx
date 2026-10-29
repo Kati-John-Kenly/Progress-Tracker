@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useContext, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+import { SignIn, SignUp } from '@clerk/react';
+import { AuthContext } from '../context/AuthState';
 import {
     Trash2,
     EyeOff,
@@ -39,6 +41,12 @@ import {
     saveStoredAccount
 } from '../utils/workspaceEvents';
 import { canInstallProgressApp, promptInstallProgressApp } from '../utils/appInstall';
+import { checkForAppUpdate } from '../utils/appUpdates';
+import {
+    getPersistentStorageInfo,
+    PERSISTENT_STORAGE_CHANGE_EVENT,
+    PERSISTENT_STORAGE_ERROR_EVENT
+} from '../utils/persistentStorage';
 import {
     getCustomGeminiApiKey,
     setCustomGeminiApiKey,
@@ -46,6 +54,18 @@ import {
 } from '../ai/agentEngine';
 
 const backupFormat = 'progress-workspace-backup';
+
+const clerkAuthAppearance = {
+    layout: {
+        socialButtonsPlacement: 'top',
+        showOptionalFields: true,
+    },
+    variables: {
+        colorPrimary: '#3b82f6',
+        borderRadius: '12px',
+        fontFamily: "'Plus Jakarta Sans', 'Inter', -apple-system, sans-serif"
+    }
+};
 // Clean iOS Toggle Switch component matching Image 1 & Image 2
 function IOSSwitch({ checked, onChange, activeColor = '#22c55e', id, ariaLabel }) {
     return (
@@ -136,13 +156,13 @@ export default function SettingsView() {
                     localStorage.removeItem('aura_conversations_v2');
                 }
             }
-            setAiFeedbackMsg(`AI Chat Storage set to: ${mode === 'session' ? 'Private Session Mode' : mode === 'none' ? 'Incognito (No saving)' : 'Persistent Local Storage'}`);
+            setAiFeedbackMsg(`Chat storage: ${mode === 'session' ? 'Session only' : mode === 'none' ? 'Not saved' : 'On this device'}`);
             setTimeout(() => setAiFeedbackMsg(''), 4000);
         } catch {}
     };
 
     const handleClearAiHistory = () => {
-        if (!window.confirm('Delete all AI conversations and clear Aura chat memory?')) return;
+        if (!window.confirm('Delete all chats and reset AI memory?')) return;
         try {
             localStorage.removeItem('aura_conversations_v2');
             localStorage.removeItem('aura_active_conv_id_v2');
@@ -182,9 +202,20 @@ export default function SettingsView() {
     const [language, setLanguage] = useState(() => localStorage.getItem('appLanguage') || 'English (US)');
 
     // Storage calculation (Image 1)
-    const [storageInfo, setStorageInfo] = useState({ percent: 12, usedText: '620KB', quotaText: '5.0MB' });
+    const [storageInfo, setStorageInfo] = useState(() => getPersistentStorageInfo());
 
     // User Profile & Authentication State (Image 1 place login/signup)
+    const authContext = useContext(AuthContext);
+    const clerkUser = authContext?.user;
+    const clerkLogout = authContext?.logout;
+    const realtimeStatus = authContext?.realtimeStatus || 'disconnected';
+    const lastSyncedAt = authContext?.lastSyncedAt;
+    const syncData = authContext?.syncData;
+    const cloudSyncError = authContext?.syncError;
+    const [authMethod, setAuthMethod] = useState('clerk'); // 'clerk' | 'username'
+    const [isManualSyncing, setIsManualSyncing] = useState(false);
+    const [syncFeedback, setSyncFeedback] = useState('');
+
     const [userProfile, setUserProfile] = useState(() => getStoredUserProfile());
     const [savedAccounts, setSavedAccounts] = useState(() => getStoredAccounts());
     const [authMode, setAuthMode] = useState('signup'); // 'signup' | 'login' | 'edit'
@@ -200,6 +231,48 @@ export default function SettingsView() {
     const [showAuthPassword, setShowAuthPassword] = useState(false);
     const [authError, setAuthError] = useState('');
     const [authSuccessMsg, setAuthSuccessMsg] = useState('');
+    const [activeModal, setActiveModal] = useState(null);
+
+    // Active authenticated profile: uses Clerk profile if signed in, or saved local user profile
+    const currentUser = useMemo(() => {
+        if (clerkUser) {
+            return {
+                name: clerkUser.name || clerkUser.username || 'User',
+                username: clerkUser.username || userProfile?.username || 'user',
+                email: clerkUser.email || userProfile?.email || '',
+                avatarPhoto: clerkUser.imageUrl || userProfile?.avatarPhoto || '',
+                avatarColor: userProfile?.avatarColor || 'gradient-blue',
+                bio: userProfile?.bio || '',
+                isClerk: true,
+            };
+        }
+        return userProfile || null;
+    }, [clerkUser, userProfile]);
+
+    // Automatically close modal when Clerk authentication succeeds
+    useEffect(() => {
+        if (clerkUser && activeModal === 'auth_modal') {
+            setActiveModal(null);
+        }
+    }, [clerkUser, activeModal]);
+
+    const handleManualSync = async () => {
+        setIsManualSyncing(true);
+        setSyncFeedback('');
+        try {
+            if (syncData) {
+                const ok = await syncData();
+                setSyncFeedback(ok ? 'Synced with Supabase Realtime Database!' : 'Sync completed locally.');
+            } else {
+                setSyncFeedback('Workspace saved locally.');
+            }
+        } catch (err) {
+            setSyncFeedback('Sync notice: ' + (err.message || 'Check connection'));
+        } finally {
+            setIsManualSyncing(false);
+            setTimeout(() => setSyncFeedback(''), 3500);
+        }
+    };
 
     const AVATAR_COLOR_OPTIONS = [
         { id: 'gradient-blue', label: 'Ocean Blue', bg: 'linear-gradient(135deg, #3b82f6, #8b5cf6)' },
@@ -326,6 +399,9 @@ export default function SettingsView() {
 
             setStoredUserProfile(newProfile);
             setUserProfile(newProfile);
+            if (syncData) {
+                syncData({ userProfile: newProfile }).catch(() => {});
+            }
             setAuthSuccessMsg('Account created successfully!');
             setTimeout(() => setActiveModal(null), 800);
 
@@ -360,6 +436,9 @@ export default function SettingsView() {
 
             setStoredUserProfile(match);
             setUserProfile(match);
+            if (syncData) {
+                syncData({ userProfile: match }).catch(() => {});
+            }
             setAuthSuccessMsg(`Welcome back, ${match.name || match.username}!`);
             setTimeout(() => setActiveModal(null), 800);
 
@@ -377,7 +456,7 @@ export default function SettingsView() {
             }
 
             const updatedProfile = {
-                ...(userProfile || {}),
+                ...(currentUser || userProfile || {}),
                 name: cleanName,
                 username: cleanUsername,
                 email: authForm.email.trim().toLowerCase(),
@@ -389,13 +468,19 @@ export default function SettingsView() {
 
             setStoredUserProfile(updatedProfile);
             setUserProfile(updatedProfile);
+            if (syncData) {
+                syncData({ userProfile: updatedProfile }).catch(() => {});
+            }
             setAuthSuccessMsg('Profile details saved!');
             setTimeout(() => setActiveModal(null), 800);
         }
     };
 
-    const handleLogOut = () => {
+    const handleLogOut = async () => {
         if (!window.confirm('Log out from this account? You will return to Guest mode.')) return;
+        if (clerkLogout) {
+            await clerkLogout();
+        }
         setStoredUserProfile(null);
         setUserProfile(null);
         setActiveModal(null);
@@ -411,7 +496,6 @@ export default function SettingsView() {
     };
 
     // Modals state: null | 'language' | 'about' | 'privacy' | 'auth_modal'
-    const [activeModal, setActiveModal] = useState(null);
     const [shareStatus, setShareStatus] = useState('');
     // Backup state
     const [backupFile, setBackupFile] = useState(null);
@@ -454,28 +538,15 @@ export default function SettingsView() {
         };
     }, []);
 
-    // Calculate real localStorage usage
     useEffect(() => {
-        try {
-            let totalChars = 0;
-            for (let i = 0; i < localStorage.length; i++) {
-                const k = localStorage.key(i);
-                const v = localStorage.getItem(k) || '';
-                totalChars += k.length + v.length;
-            }
-            const bytes = totalChars * 2; // UTF-16
-            const quota = 5 * 1024 * 1024; // 5MB standard HTML5 localStorage
-            const usedMB = (bytes / (1024 * 1024)).toFixed(1);
-            const usedKB = Math.round(bytes / 1024);
-            const percent = Math.min(100, Math.max(8, Math.round((bytes / quota) * 100)));
-            setStorageInfo({
-                percent,
-                usedText: bytes > 1024 * 1024 ? `${usedMB}MB` : `${usedKB}KB`,
-                quotaText: '5.0MB',
-            });
-        } catch {
-            setStorageInfo({ percent: 25, usedText: '1.2MB', quotaText: '5.0MB' });
-        }
+        const refreshStorageInfo = () => setStorageInfo(getPersistentStorageInfo());
+        refreshStorageInfo();
+        window.addEventListener(PERSISTENT_STORAGE_CHANGE_EVENT, refreshStorageInfo);
+        window.addEventListener(PERSISTENT_STORAGE_ERROR_EVENT, refreshStorageInfo);
+        return () => {
+            window.removeEventListener(PERSISTENT_STORAGE_CHANGE_EVENT, refreshStorageInfo);
+            window.removeEventListener(PERSISTENT_STORAGE_ERROR_EVENT, refreshStorageInfo);
+        };
     }, [theme, notifications, language]);
 
     // Handlers
@@ -512,71 +583,13 @@ export default function SettingsView() {
     };
 
     const handleDownloadUpdate = async () => {
-        if (!('serviceWorker' in navigator)) {
-            setUpdateMessage('This browser cannot install app updates. Reload the page to get the latest version.');
-            return;
-        }
-
         setIsCheckingForUpdate(true);
         setUpdateMessage('Checking for updates…');
         try {
-            const registration = await navigator.serviceWorker.getRegistration('/');
-            if (!registration) {
-                setUpdateMessage('Update support is not ready yet. Reload the page and try again.');
-                return;
-            }
-
-            await registration.update();
-            let waitingWorker = registration.waiting;
-
-            if (!waitingWorker && registration.installing) {
-                const installingWorker = registration.installing;
-                await new Promise((resolve, reject) => {
-                    const timeout = window.setTimeout(
-                        () => reject(new Error('The update check timed out. Try again when you have a stable connection.')),
-                        20000,
-                    );
-                    const finish = (hasUpdate) => {
-                        window.clearTimeout(timeout);
-                        resolve(hasUpdate);
-                    };
-                    const handleStateChange = () => {
-                        if (installingWorker.state === 'installed' || installingWorker.state === 'redundant') {
-                            finish(installingWorker.state === 'installed');
-                        }
-                    };
-                    installingWorker.addEventListener('statechange', handleStateChange);
-                    handleStateChange();
-                });
-                waitingWorker = registration.waiting;
-            }
-
-            if (!waitingWorker) {
-                setUpdateMessage('You are using the latest version.');
-                return;
-            }
-
-            setUpdateMessage('Downloading and applying the update…');
-            const activated = new Promise((resolve, reject) => {
-                const timeout = window.setTimeout(
-                    () => reject(new Error('The update could not be activated. Please reload and try again.')),
-                    20000,
-                );
-                const handleStateChange = () => {
-                    if (waitingWorker.state === 'activated') {
-                        window.clearTimeout(timeout);
-                        resolve();
-                    } else if (waitingWorker.state === 'redundant') {
-                        window.clearTimeout(timeout);
-                        reject(new Error('The update was interrupted. Please try again.'));
-                    }
-                };
-                waitingWorker.addEventListener('statechange', handleStateChange);
-                handleStateChange();
-            });
-            waitingWorker.postMessage({ type: 'SKIP_WAITING' });
-            await activated;
-            window.location.reload();
+            const updateAvailable = await checkForAppUpdate();
+            setUpdateMessage(updateAvailable
+                ? 'A new update is ready. Open notifications to explore the latest features.'
+                : 'You are using the latest version.');
         } catch (error) {
             console.error('Progress update check failed:', error);
             setUpdateMessage(error.message || 'Could not check for updates. Please try again.');
@@ -688,8 +701,8 @@ export default function SettingsView() {
                     <h1 className="ios-settings-title">Settings</h1>
                 </header>
 
-                {/* USER PROFILE CARD (IMAGE 1 TEMPLATE - DYNAMIC AUTH & PROFILE) */}
-                {userProfile ? (
+                {/* USER PROFILE CARD (DYNAMIC REAL-TIME DATABASE & AUTH) */}
+                {currentUser ? (
                     <section
                         className="ios-card ios-profile-card ios-profile-interactive"
                         onClick={() => handleOpenAuthModal('edit')}
@@ -698,28 +711,39 @@ export default function SettingsView() {
                         aria-label="Edit Profile Details"
                     >
                         <div className="ios-profile-content">
-                            {userProfile.avatarPhoto ? (
-                                <img src={userProfile.avatarPhoto} alt={userProfile.name} className="ios-profile-avatar-img" />
+                            {currentUser.avatarPhoto ? (
+                                <img src={currentUser.avatarPhoto} alt={currentUser.name} className="ios-profile-avatar-img" />
                             ) : (
                                 <div
                                     className="ios-profile-avatar-initials"
-                                    style={{ background: getProfileGradient(userProfile.avatarColor) }}
+                                    style={{ background: getProfileGradient(currentUser.avatarColor) }}
                                 >
-                                    {getProfileInitials(userProfile.name, userProfile.username)}
+                                    {getProfileInitials(currentUser.name, currentUser.username)}
                                 </div>
                             )}
                             <div className="ios-profile-text">
                                 <div className="ios-profile-title-row">
-                                    <h2 className="ios-profile-name">{userProfile.name}</h2>
-                                    <span className="ios-profile-badge">Active</span>
+                                    <h2 className="ios-profile-name">{currentUser.name}</h2>
+                                    {realtimeStatus === 'connected' ? (
+                                        <span className="ios-profile-badge realtime" title="Live Supabase Realtime Database active">
+                                            <span className="ios-badge-pulse-dot" /> Live DB
+                                        </span>
+                                    ) : (
+                                        <span className="ios-profile-badge">Active</span>
+                                    )}
                                 </div>
                                 <p className="ios-profile-email">
-                                    <span className="ios-profile-username">@{userProfile.username}</span>
-                                    {userProfile.email && <span className="ios-profile-dot">•</span>}
-                                    {userProfile.email && <span>{userProfile.email}</span>}
+                                    <span className="ios-profile-username">@{currentUser.username}</span>
+                                    {currentUser.email && <span className="ios-profile-dot">•</span>}
+                                    {currentUser.email && <span>{currentUser.email}</span>}
                                 </p>
-                                {userProfile.bio && (
-                                    <p className="ios-profile-bio-preview">{userProfile.bio}</p>
+                                {currentUser.bio && (
+                                    <p className="ios-profile-bio-preview">{currentUser.bio}</p>
+                                )}
+                                {lastSyncedAt && (
+                                    <p className="ios-profile-sync-status">
+                                        ⚡ Realtime synced: {new Date(lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </p>
                                 )}
                             </div>
                             <div className="ios-profile-arrow-wrap">
@@ -727,6 +751,34 @@ export default function SettingsView() {
                                 <ChevronRight size={18} className="ios-profile-arrow" />
                             </div>
                         </div>
+
+                        {/* QUICK ACTION BAR FOR LOGGED-IN USERS */}
+                        <div className="ios-profile-logged-actions" onClick={(e) => e.stopPropagation()}>
+                            <button
+                                type="button"
+                                className="ios-profile-quick-action-btn sync"
+                                onClick={handleManualSync}
+                                disabled={isManualSyncing}
+                                title="Sync with Real-Time Database"
+                            >
+                                <RefreshCw size={13} className={isManualSyncing ? 'spin-icon' : ''} />
+                                <span>{isManualSyncing ? 'Syncing...' : 'Sync Database'}</span>
+                            </button>
+                            <button
+                                type="button"
+                                className="ios-profile-quick-action-btn logout"
+                                onClick={handleLogOut}
+                                title="Sign out from workspace"
+                            >
+                                <LogOut size={13} />
+                                <span>Log Out</span>
+                            </button>
+                        </div>
+                        {syncFeedback && (
+                            <p className="ios-profile-sync-feedback" role="status">
+                                {syncFeedback}
+                            </p>
+                        )}
                     </section>
                 ) : (
                     <section className="ios-card ios-profile-card ios-profile-guest">
@@ -853,6 +905,14 @@ export default function SettingsView() {
                     <div className="ios-storage-meta">
                         <span>{storageInfo.percent}% used — {storageInfo.usedText} of {storageInfo.quotaText}</span>
                     </div>
+                    <p className="ios-storage-note">
+                        {storageInfo.backend === 'indexedDB'
+                            ? 'Saved on this device using expanded app storage.'
+                            : 'Expanded storage is unavailable; this browser is using its smaller local storage limit.'}
+                    </p>
+                    {storageInfo.warning && (
+                        <p className="ios-storage-warning" role="alert">{storageInfo.warning}</p>
+                    )}
 
                     {/* Data Backup & Restore */}
                     <div className="ios-backup-actions">
@@ -922,7 +982,7 @@ export default function SettingsView() {
                             {isCheckingForUpdate
                                 ? <LoaderCircle size={17} className="ios-app-update-spinner" />
                                 : <RefreshCw size={17} />}
-                            {isCheckingForUpdate ? 'Checking…' : 'Download new update'}
+                            {isCheckingForUpdate ? 'Checking…' : 'Check for updates'}
                         </button>
                     </div>
                     {installMessage && <p className="ios-app-update-message" role="status">{installMessage}</p>}
@@ -931,7 +991,7 @@ export default function SettingsView() {
 
 
                 {/* SECTION: AURA AI & PRIVACY */}
-                <div className="ios-section-label" id="ai-settings">Aura AI &amp; Privacy (Gemini)</div>
+                <div className="ios-section-label" id="ai-settings">AI &amp; Privacy</div>
                 <section className="ios-card ios-card-grouped">
                     {/* GEMINI ENGINE & API KEY ROW */}
                     <div className="ios-row">
@@ -944,10 +1004,10 @@ export default function SettingsView() {
                                 <span className="ios-row-subtitle">
                                     {customApiKey ? (
                                         <span style={{ color: 'var(--success, #10b981)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                            <Check size={12} /> Personal Key Active (••••{customApiKey.slice(-4)})
+                                            <Check size={12} /> Personal key active (••••{customApiKey.slice(-4)})
                                         </span>
                                     ) : (
-                                        'Standard Workspace AI (Default)'
+                                        'Using default AI'
                                     )}
                                 </span>
                             </div>
@@ -967,7 +1027,7 @@ export default function SettingsView() {
                                 cursor: 'pointer'
                             }}
                         >
-                            {customApiKey ? 'Manage Key' : 'Connect Personal Key'}
+                            {customApiKey ? 'Manage key' : 'Add API key'}
                         </button>
                     </div>
 
@@ -980,9 +1040,9 @@ export default function SettingsView() {
                                 <ShieldCheck size={18} />
                             </span>
                             <div className="ios-row-text">
-                                <span className="ios-row-title">Chat Storage Privacy</span>
+                                <span className="ios-row-title">Chat storage</span>
                                 <span className="ios-row-subtitle">
-                                    {aiStorageMode === 'session' ? 'Private Session (Cleared on exit)' : aiStorageMode === 'none' ? 'Incognito (Never stored)' : 'Local Storage (Saved on device)'}
+                                    {aiStorageMode === 'session' ? 'Session only' : aiStorageMode === 'none' ? 'Not saved' : 'Saved on this device'}
                                 </span>
                             </div>
                         </div>
@@ -1001,9 +1061,9 @@ export default function SettingsView() {
                                 cursor: 'pointer'
                             }}
                         >
-                            <option value="local">Local Storage (Saved)</option>
-                            <option value="session">Private Session Mode</option>
-                            <option value="none">Incognito (No saving)</option>
+                            <option value="local">On this device</option>
+                            <option value="session">Session only</option>
+                            <option value="none">Do not save</option>
                         </select>
                     </div>
 
@@ -1020,8 +1080,8 @@ export default function SettingsView() {
                                 <Download size={18} />
                             </span>
                             <div className="ios-row-text">
-                                <span className="ios-row-title">Export AI Conversations</span>
-                                <span className="ios-row-subtitle">Download chats in JSON format</span>
+                                <span className="ios-row-title">Export AI chats</span>
+                                <span className="ios-row-subtitle">Download a chat backup</span>
                             </div>
                         </div>
                         <div className="ios-row-right">
@@ -1042,8 +1102,8 @@ export default function SettingsView() {
                                 <Trash2 size={18} />
                             </span>
                             <div className="ios-row-text">
-                                <span className="ios-row-title" style={{ color: 'var(--danger, #ef4444)' }}>Clear AI Memory &amp; Chat History</span>
-                                <span className="ios-row-subtitle">Wipe all stored conversations and reset Aura memory</span>
+                                <span className="ios-row-title" style={{ color: 'var(--danger, #ef4444)' }}>Clear AI chats</span>
+                                <span className="ios-row-subtitle">Delete chats and reset AI memory</span>
                             </div>
                         </div>
                         <div className="ios-row-right">
@@ -1485,284 +1545,320 @@ export default function SettingsView() {
 
                         {/* TAB SELECTOR: LOGIN vs SIGN UP (hidden in edit mode) */}
                         {authMode !== 'edit' && (
-                            <div className="ios-auth-tabs">
-                                <button
-                                    type="button"
-                                    className={`ios-auth-tab ${authMode === 'login' ? 'active' : ''}`}
-                                    onClick={() => { setAuthMode('login'); setAuthError(''); }}
-                                >
-                                    <LogIn size={15} />
-                                    <span>Log In</span>
-                                </button>
-                                <button
-                                    type="button"
-                                    className={`ios-auth-tab ${authMode === 'signup' ? 'active' : ''}`}
-                                    onClick={() => { setAuthMode('signup'); setAuthError(''); }}
-                                >
-                                    <UserPlus size={15} />
-                                    <span>Sign Up</span>
-                                </button>
-                            </div>
-                        )}
-
-                        {authError && (
-                            <div className="ios-auth-alert error" role="alert">
-                                {authError}
-                            </div>
-                        )}
-                        {authSuccessMsg && (
-                            <div className="ios-auth-alert success" role="status">
-                                <Check size={16} />
-                                <span>{authSuccessMsg}</span>
-                            </div>
-                        )}
-
-                        <form onSubmit={handleAuthSubmit} className="ios-auth-form">
-                            {/* SIGN UP & EDIT: FULL NAME */}
-                            {(authMode === 'signup' || authMode === 'edit') && (
-                                <div className="ios-auth-field">
-                                    <label className="ios-auth-label">Full Name</label>
-                                    <input
-                                        type="text"
-                                        className="ios-auth-input"
-                                        placeholder="e.g. John Kenly"
-                                        value={authForm.name}
-                                        onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })}
-                                        required
-                                    />
-                                </div>
-                            )}
-
-                            {/* USERNAME FIELD */}
-                            <div className="ios-auth-field">
-                                <label className="ios-auth-label">
-                                    {authMode === 'login' ? 'Username or Email' : 'Username'}
-                                </label>
-                                <div className="ios-auth-input-group">
-                                    {authMode !== 'login' && <span className="ios-auth-addon">@</span>}
-                                    <input
-                                        type="text"
-                                        className="ios-auth-input"
-                                        placeholder={authMode === 'login' ? 'Enter @username or email' : 'john_kenly'}
-                                        value={authForm.username}
-                                        onChange={(e) => setAuthForm({ ...authForm, username: e.target.value })}
-                                        required
-                                        autoCapitalize="none"
-                                        autoCorrect="off"
-                                    />
-                                </div>
-                            </div>
-
-                            {/* EMAIL FIELD (SIGN UP & EDIT) */}
-                            {(authMode === 'signup' || authMode === 'edit') && (
-                                <div className="ios-auth-field">
-                                    <label className="ios-auth-label">Email Address (Optional)</label>
-                                    <input
-                                        type="email"
-                                        className="ios-auth-input"
-                                        placeholder="john@example.com"
-                                        value={authForm.email}
-                                        onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
-                                    />
-                                </div>
-                            )}
-
-                            {/* PASSWORD FIELD */}
-                            <div className="ios-auth-field">
-                                <label className="ios-auth-label">
-                                    {authMode === 'edit' ? 'Password (Leave blank to keep current)' : 'Password'}
-                                </label>
-                                <div className="ios-auth-input-group">
-                                    <input
-                                        type={showAuthPassword ? 'text' : 'password'}
-                                        className="ios-auth-input"
-                                        placeholder={authMode === 'edit' ? 'Enter new password (optional)' : 'Enter password'}
-                                        value={authForm.password}
-                                        onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
-                                        required={authMode !== 'edit'}
-                                    />
+                            <>
+                                <div className="ios-auth-tabs">
                                     <button
                                         type="button"
-                                        className="ios-auth-toggle-pwd"
-                                        onClick={() => setShowAuthPassword(!showAuthPassword)}
-                                        aria-label="Toggle password visibility"
+                                        className={`ios-auth-tab ${authMode === 'login' ? 'active' : ''}`}
+                                        onClick={() => { setAuthMode('login'); setAuthError(''); }}
                                     >
-                                        {showAuthPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                        <LogIn size={15} />
+                                        <span>Log In</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={`ios-auth-tab ${authMode === 'signup' ? 'active' : ''}`}
+                                        onClick={() => { setAuthMode('signup'); setAuthError(''); }}
+                                    >
+                                        <UserPlus size={15} />
+                                        <span>Sign Up</span>
                                     </button>
                                 </div>
+
+                                {/* AUTH METHOD TOGGLE: CLERK REALTIME vs USERNAME FORM */}
+                                <div className="ios-auth-method-tabs">
+                                    <button
+                                        type="button"
+                                        className={`ios-auth-method-pill ${authMethod === 'clerk' ? 'active' : ''}`}
+                                        onClick={() => setAuthMethod('clerk')}
+                                    >
+                                        <Sparkles size={13} />
+                                        <span>Live Database & Clerk</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={`ios-auth-method-pill ${authMethod === 'username' ? 'active' : ''}`}
+                                        onClick={() => setAuthMethod('username')}
+                                    >
+                                        <User size={13} />
+                                        <span>Custom Username</span>
+                                    </button>
+                                </div>
+                            </>
+                        )}
+
+                        {/* CLERK EMBEDDED AUTH (SUPABASE REALTIME SYNCED) */}
+                        {authMode !== 'edit' && authMethod === 'clerk' ? (
+                            <div className="ios-clerk-container">
+                                {authMode === 'login' ? (
+                                    <SignIn appearance={clerkAuthAppearance} routing="virtual" />
+                                ) : (
+                                    <SignUp appearance={clerkAuthAppearance} routing="virtual" />
+                                )}
                             </div>
+                        ) : (
+                            /* CUSTOM USERNAME & PROFILE FORM */
+                            <>
+                                {authError && (
+                                    <div className="ios-auth-alert error" role="alert">
+                                        {authError}
+                                    </div>
+                                )}
+                                {authSuccessMsg && (
+                                    <div className="ios-auth-alert success" role="status">
+                                        <Check size={16} />
+                                        <span>{authSuccessMsg}</span>
+                                    </div>
+                                )}
 
-                            {/* AVATAR & APPEARANCE (SIGN UP & EDIT) */}
-                            {(authMode === 'signup' || authMode === 'edit') && (
-                                <div className="ios-auth-field">
-                                    <label className="ios-auth-label">Profile Avatar & Color</label>
-                                    <div className="ios-avatar-customizer">
-                                        {/* Live Avatar Preview */}
-                                        <div className="ios-avatar-preview-box">
-                                            {authForm.avatarPhoto ? (
-                                                <img
-                                                    src={authForm.avatarPhoto}
-                                                    alt="Avatar Preview"
-                                                    className="ios-avatar-preview-img"
-                                                />
-                                            ) : (
-                                                <div
-                                                    className="ios-avatar-preview-initials"
-                                                    style={{ background: getProfileGradient(authForm.avatarColor) }}
-                                                >
-                                                    {getProfileInitials(authForm.name, authForm.username)}
-                                                </div>
-                                            )}
+                                <form onSubmit={handleAuthSubmit} className="ios-auth-form">
+                                    {/* SIGN UP & EDIT: FULL NAME */}
+                                    {(authMode === 'signup' || authMode === 'edit') && (
+                                        <div className="ios-auth-field">
+                                            <label className="ios-auth-label">Full Name</label>
+                                            <input
+                                                type="text"
+                                                className="ios-auth-input"
+                                                placeholder="e.g. John Kenly"
+                                                value={authForm.name}
+                                                onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })}
+                                                required
+                                            />
                                         </div>
+                                    )}
 
-                                        {/* Color Palette Swatches */}
-                                        <div className="ios-avatar-swatches-wrap">
-                                            <span className="ios-swatches-title">Color Theme</span>
-                                            <div className="ios-color-swatches" role="radiogroup">
-                                                {AVATAR_COLOR_OPTIONS.map((opt) => (
+                                    {/* USERNAME FIELD */}
+                                    <div className="ios-auth-field">
+                                        <label className="ios-auth-label">
+                                            {authMode === 'login' ? 'Username or Email' : 'Username'}
+                                        </label>
+                                        <div className="ios-auth-input-group">
+                                            {authMode !== 'login' && <span className="ios-auth-addon">@</span>}
+                                            <input
+                                                type="text"
+                                                className="ios-auth-input"
+                                                placeholder={authMode === 'login' ? 'Enter @username or email' : 'john_kenly'}
+                                                value={authForm.username}
+                                                onChange={(e) => setAuthForm({ ...authForm, username: e.target.value })}
+                                                required
+                                                autoCapitalize="none"
+                                                autoCorrect="off"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* EMAIL FIELD (SIGN UP & EDIT) */}
+                                    {(authMode === 'signup' || authMode === 'edit') && (
+                                        <div className="ios-auth-field">
+                                            <label className="ios-auth-label">Email Address (Optional)</label>
+                                            <input
+                                                type="email"
+                                                className="ios-auth-input"
+                                                placeholder="john@example.com"
+                                                value={authForm.email}
+                                                onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
+                                            />
+                                        </div>
+                                    )}
+
+                                    {/* PASSWORD FIELD */}
+                                    <div className="ios-auth-field">
+                                        <label className="ios-auth-label">
+                                            {authMode === 'edit' ? 'Password (Leave blank to keep current)' : 'Password'}
+                                        </label>
+                                        <div className="ios-auth-input-group">
+                                            <input
+                                                type={showAuthPassword ? 'text' : 'password'}
+                                                className="ios-auth-input"
+                                                placeholder={authMode === 'edit' ? 'Enter new password (optional)' : 'Enter password'}
+                                                value={authForm.password}
+                                                onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
+                                                required={authMode !== 'edit'}
+                                            />
+                                            <button
+                                                type="button"
+                                                className="ios-auth-toggle-pwd"
+                                                onClick={() => setShowAuthPassword(!showAuthPassword)}
+                                                aria-label="Toggle password visibility"
+                                            >
+                                                {showAuthPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* AVATAR & APPEARANCE (SIGN UP & EDIT) */}
+                                    {(authMode === 'signup' || authMode === 'edit') && (
+                                        <div className="ios-auth-field">
+                                            <label className="ios-auth-label">Profile Avatar & Color</label>
+                                            <div className="ios-avatar-customizer">
+                                                {/* Live Avatar Preview */}
+                                                <div className="ios-avatar-preview-box">
+                                                    {authForm.avatarPhoto ? (
+                                                        <img
+                                                            src={authForm.avatarPhoto}
+                                                            alt="Avatar Preview"
+                                                            className="ios-avatar-preview-img"
+                                                        />
+                                                    ) : (
+                                                        <div
+                                                            className="ios-avatar-preview-initials"
+                                                            style={{ background: getProfileGradient(authForm.avatarColor) }}
+                                                        >
+                                                            {getProfileInitials(authForm.name, authForm.username)}
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                {/* Color Palette Swatches */}
+                                                <div className="ios-avatar-swatches-wrap">
+                                                    <span className="ios-swatches-title">Color Theme</span>
+                                                    <div className="ios-color-swatches" role="radiogroup">
+                                                        {AVATAR_COLOR_OPTIONS.map((opt) => (
+                                                            <button
+                                                                key={opt.id}
+                                                                type="button"
+                                                                className={`ios-swatch-circle ${authForm.avatarColor === opt.id ? 'active' : ''}`}
+                                                                style={{ background: opt.bg }}
+                                                                title={opt.label}
+                                                                onClick={() => setAuthForm({ ...authForm, avatarColor: opt.id })}
+                                                            >
+                                                                {authForm.avatarColor === opt.id && <Check size={14} color="#fff" />}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Photo Upload Option */}
+                                            <div className="ios-photo-upload-row">
+                                                <label className="ios-photo-upload-btn">
+                                                    <Camera size={15} />
+                                                    <span>{authForm.avatarPhoto ? 'Change Photo' : 'Upload Photo'}</span>
+                                                    <input
+                                                        type="file"
+                                                        accept="image/*"
+                                                        onChange={handlePhotoUpload}
+                                                        style={{ display: 'none' }}
+                                                    />
+                                                </label>
+                                                {authForm.avatarPhoto && (
                                                     <button
-                                                        key={opt.id}
                                                         type="button"
-                                                        className={`ios-swatch-circle ${authForm.avatarColor === opt.id ? 'active' : ''}`}
-                                                        style={{ background: opt.bg }}
-                                                        title={opt.label}
-                                                        onClick={() => setAuthForm({ ...authForm, avatarColor: opt.id })}
+                                                        className="ios-photo-remove-btn"
+                                                        onClick={handleRemovePhoto}
                                                     >
-                                                        {authForm.avatarColor === opt.id && <Check size={14} color="#fff" />}
+                                                        <Trash2 size={14} />
+                                                        <span>Remove Photo</span>
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* BIO (SIGN UP & EDIT) */}
+                                    {(authMode === 'signup' || authMode === 'edit') && (
+                                        <div className="ios-auth-field">
+                                            <label className="ios-auth-label">Status / Bio (Optional)</label>
+                                            <input
+                                                type="text"
+                                                className="ios-auth-input"
+                                                placeholder="e.g. Focus on habits, finance, and goals"
+                                                value={authForm.bio}
+                                                onChange={(e) => setAuthForm({ ...authForm, bio: e.target.value })}
+                                                maxLength={80}
+                                            />
+                                        </div>
+                                    )}
+
+                                    {/* SAVED PROFILES LIST (ON LOGIN) */}
+                                    {authMode === 'login' && savedAccounts.length > 0 && (
+                                        <div className="ios-saved-accounts-section">
+                                            <span className="ios-saved-accounts-title">Saved accounts on this device:</span>
+                                            <div className="ios-saved-accounts-list">
+                                                {savedAccounts.map((acc, idx) => (
+                                                    <button
+                                                        key={idx}
+                                                        type="button"
+                                                        className="ios-saved-account-pill"
+                                                        onClick={() => handleSelectSavedAccount(acc)}
+                                                    >
+                                                        <div
+                                                            className="ios-saved-account-avatar"
+                                                            style={{ background: getProfileGradient(acc.avatarColor) }}
+                                                        >
+                                                            {acc.avatarPhoto ? (
+                                                                <img src={acc.avatarPhoto} alt="" />
+                                                            ) : (
+                                                                getProfileInitials(acc.name, acc.username)
+                                                            )}
+                                                        </div>
+                                                        <span className="ios-saved-account-name">@{acc.username}</span>
                                                     </button>
                                                 ))}
                                             </div>
                                         </div>
-                                    </div>
+                                    )}
 
-                                    {/* Photo Upload Option */}
-                                    <div className="ios-photo-upload-row">
-                                        <label className="ios-photo-upload-btn">
-                                            <Camera size={15} />
-                                            <span>{authForm.avatarPhoto ? 'Change Photo' : 'Upload Photo'}</span>
-                                            <input
-                                                type="file"
-                                                accept="image/*"
-                                                onChange={handlePhotoUpload}
-                                                style={{ display: 'none' }}
-                                            />
-                                        </label>
-                                        {authForm.avatarPhoto && (
-                                            <button
-                                                type="button"
-                                                className="ios-photo-remove-btn"
-                                                onClick={handleRemovePhoto}
-                                            >
-                                                <Trash2 size={14} />
-                                                <span>Remove Photo</span>
-                                            </button>
+                                    {/* SUBMIT BUTTON */}
+                                    <button type="submit" className="ios-auth-submit-btn">
+                                        {authMode === 'signup' ? (
+                                            <>
+                                                <UserPlus size={18} />
+                                                <span>Create Account & Sign In</span>
+                                            </>
+                                        ) : authMode === 'login' ? (
+                                            <>
+                                                <LogIn size={18} />
+                                                <span>Log In to Workspace</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Check size={18} />
+                                                <span>Save Profile Changes</span>
+                                            </>
                                         )}
-                                    </div>
-                                </div>
-                            )}
+                                    </button>
 
-                            {/* BIO (SIGN UP & EDIT) */}
-                            {(authMode === 'signup' || authMode === 'edit') && (
-                                <div className="ios-auth-field">
-                                    <label className="ios-auth-label">Status / Bio (Optional)</label>
-                                    <input
-                                        type="text"
-                                        className="ios-auth-input"
-                                        placeholder="e.g. Focus on habits, finance, and goals"
-                                        value={authForm.bio}
-                                        onChange={(e) => setAuthForm({ ...authForm, bio: e.target.value })}
-                                        maxLength={80}
-                                    />
-                                </div>
-                            )}
+                                    {/* LOG OUT / SWITCH ACCOUNT (EDIT MODE) */}
+                                    {authMode === 'edit' && (
+                                        <button
+                                            type="button"
+                                            className="ios-auth-logout-btn"
+                                            onClick={handleLogOut}
+                                        >
+                                            <LogOut size={16} />
+                                            <span>Log Out & Switch to Guest</span>
+                                        </button>
+                                    )}
 
-                            {/* SAVED PROFILES LIST (ON LOGIN) */}
-                            {authMode === 'login' && savedAccounts.length > 0 && (
-                                <div className="ios-saved-accounts-section">
-                                    <span className="ios-saved-accounts-title">Saved accounts on this device:</span>
-                                    <div className="ios-saved-accounts-list">
-                                        {savedAccounts.map((acc, idx) => (
+                                    {/* BOTTOM SWITCH LINK */}
+                                    {authMode === 'login' && (
+                                        <p className="ios-auth-switch-prompt">
+                                            Don't have an account yet?{' '}
                                             <button
-                                                key={idx}
                                                 type="button"
-                                                className="ios-saved-account-pill"
-                                                onClick={() => handleSelectSavedAccount(acc)}
+                                                className="ios-auth-inline-link"
+                                                onClick={() => { setAuthMode('signup'); setAuthError(''); }}
                                             >
-                                                <div
-                                                    className="ios-saved-account-avatar"
-                                                    style={{ background: getProfileGradient(acc.avatarColor) }}
-                                                >
-                                                    {acc.avatarPhoto ? (
-                                                        <img src={acc.avatarPhoto} alt="" />
-                                                    ) : (
-                                                        getProfileInitials(acc.name, acc.username)
-                                                    )}
-                                                </div>
-                                                <span className="ios-saved-account-name">@{acc.username}</span>
+                                                Sign Up with your details
                                             </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* SUBMIT BUTTON */}
-                            <button type="submit" className="ios-auth-submit-btn">
-                                {authMode === 'signup' ? (
-                                    <>
-                                        <UserPlus size={18} />
-                                        <span>Create Account & Sign In</span>
-                                    </>
-                                ) : authMode === 'login' ? (
-                                    <>
-                                        <LogIn size={18} />
-                                        <span>Log In to Workspace</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <Check size={18} />
-                                        <span>Save Profile Changes</span>
-                                    </>
-                                )}
-                            </button>
-
-                            {/* LOG OUT / SWITCH ACCOUNT (EDIT MODE) */}
-                            {authMode === 'edit' && (
-                                <button
-                                    type="button"
-                                    className="ios-auth-logout-btn"
-                                    onClick={handleLogOut}
-                                >
-                                    <LogOut size={16} />
-                                    <span>Log Out & Switch to Guest</span>
-                                </button>
-                            )}
-
-                            {/* BOTTOM SWITCH LINK */}
-                            {authMode === 'login' && (
-                                <p className="ios-auth-switch-prompt">
-                                    Don't have an account yet?{' '}
-                                    <button
-                                        type="button"
-                                        className="ios-auth-inline-link"
-                                        onClick={() => { setAuthMode('signup'); setAuthError(''); }}
-                                    >
-                                        Sign Up with your details
-                                    </button>
-                                </p>
-                            )}
-                            {authMode === 'signup' && (
-                                <p className="ios-auth-switch-prompt">
-                                    Already have an account?{' '}
-                                    <button
-                                        type="button"
-                                        className="ios-auth-inline-link"
-                                        onClick={() => { setAuthMode('login'); setAuthError(''); }}
-                                    >
-                                        Log In here
-                                    </button>
-                                </p>
-                            )}
-                        </form>
+                                        </p>
+                                    )}
+                                    {authMode === 'signup' && (
+                                        <p className="ios-auth-switch-prompt">
+                                            Already have an account?{' '}
+                                            <button
+                                                type="button"
+                                                className="ios-auth-inline-link"
+                                                onClick={() => { setAuthMode('login'); setAuthError(''); }}
+                                            >
+                                                Log In here
+                                            </button>
+                                        </p>
+                                    )}
+                                </form>
+                            </>
+                        )}
                     </div>
                 </div>
             )}

@@ -1,25 +1,48 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
+import { ClerkProvider } from '@clerk/react'
 import App from './App.jsx'
 import './index.css'
 import './utils/appInstall.js'
 import { applyAppTheme, getStoredTheme } from './utils/workspaceEvents'
+import { initializePersistentStorage } from './utils/persistentStorage'
+import { initializeAppUpdates } from './utils/appUpdates'
 
-applyAppTheme(getStoredTheme())
+const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((error) => {
+  const registerAppUpdates = () => {
+    initializeAppUpdates().catch((error) => {
       console.error('Progress service worker registration failed:', error)
     })
-  })
+  }
+  if (document.readyState === 'complete') registerAppUpdates()
+  else window.addEventListener('load', registerAppUpdates, { once: true })
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </React.StrictMode>,
-)
+const startApplication = async () => {
+  await initializePersistentStorage()
+  applyAppTheme(getStoredTheme())
+
+  ReactDOM.createRoot(document.getElementById('root')).render(
+    <React.StrictMode>
+      {clerkPublishableKey ? (
+        <ClerkProvider publishableKey={clerkPublishableKey}>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+        </ClerkProvider>
+      ) : (
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      )}
+    </React.StrictMode>,
+  )
+}
+
+startApplication().catch((error) => {
+  console.error('Progress could not start:', error)
+  document.getElementById('root').textContent = 'Progress could not start. Please reload the app.'
+})

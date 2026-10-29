@@ -1,4 +1,5 @@
 import { Routes, Route } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
 
 // Pages & Components
 import DashboardLayout from './components/DashboardLayout';
@@ -10,16 +11,18 @@ import SettingsView from './pages/SettingsView';
 
 function App() {
     return (
-        <Routes>
-            <Route path="/" element={<DashboardLayout />}>
-                <Route index element={<HomeView />} />
-                <Route path="routine" element={<RoutineView />} />
-                <Route path="schedule" element={<RoutineView />} />
-                <Route path="finance" element={<FinanceView key="finance" />} />
-                <Route path="analytics" element={<AnalyticsView />} />
-                <Route path="settings" element={<SettingsView />} />
-            </Route>
-        </Routes>
+        <AuthProvider>
+            <Routes>
+                <Route path="/" element={<DashboardLayout />}>
+                    <Route index element={<HomeView />} />
+                    <Route path="routine" element={<RoutineView />} />
+                    <Route path="schedule" element={<RoutineView />} />
+                    <Route path="finance" element={<FinanceView key="finance" />} />
+                    <Route path="analytics" element={<AnalyticsView />} />
+                    <Route path="settings" element={<SettingsView />} />
+                </Route>
+            </Routes>
+        </AuthProvider>
     );
 }
 

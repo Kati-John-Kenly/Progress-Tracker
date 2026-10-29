@@ -222,15 +222,15 @@ const snapFabToSide = (posX, posY) => {
     const fabSize = 54;
     const screenWidth = typeof window !== 'undefined' ? window.innerWidth : 400;
     const screenHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
-    const isMobile = screenWidth <= 600;
+    const isMobile = screenWidth <= 640;
 
     // Generous gap from side walls so it never hugs the bezel
-    const sideGap = isMobile ? 24 : 36;
+    const sideGap = isMobile ? 12 : 28;
     const isLeft = (posX + fabSize / 2) < (screenWidth / 2);
     const finalX = isLeft ? sideGap : (screenWidth - fabSize - sideGap);
 
-    const minY = 24;
-    const bottomNavMargin = isMobile ? 86 : 30;
+    const minY = 20;
+    const bottomNavMargin = isMobile ? 74 : 26;
     const maxY = Math.max(minY, screenHeight - fabSize - bottomNavMargin);
     const finalY = Math.min(Math.max(minY, posY), maxY);
 
@@ -238,17 +238,17 @@ const snapFabToSide = (posX, posY) => {
 };
 
 const snapWindowToSide = (posX, posY, isMin) => {
-    const width = isMin ? 200 : 340;
     const screenWidth = typeof window !== 'undefined' ? window.innerWidth : 400;
     const screenHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
-    const isMobile = screenWidth <= 600;
+    const isMobile = screenWidth <= 640;
+    const width = isMin ? (isMobile ? 160 : 180) : (isMobile ? Math.min(screenWidth - 20, 356) : 340);
 
-    const sideGap = isMobile ? 18 : 32;
+    const sideGap = isMobile ? 10 : 24;
     const isLeft = (posX + width / 2) < (screenWidth / 2);
     const finalX = isLeft ? sideGap : (screenWidth - width - sideGap);
 
-    const minY = 24;
-    const bottomNavMargin = isMobile ? 88 : 30;
+    const minY = 20;
+    const bottomNavMargin = isMobile ? 74 : 26;
     const maxY = Math.max(minY, screenHeight - (isMin ? 44 : 450) - bottomNavMargin);
     const finalY = Math.min(Math.max(minY, posY), maxY);
 
@@ -313,26 +313,31 @@ export default function AIAssistantBot({ onOpenStreakModal }) {
 
     // MOVABLE POSITION STATES
     const [windowPos, setWindowPos] = useState(() => {
+        const screenW = typeof window !== 'undefined' ? window.innerWidth : 400;
+        const screenH = typeof window !== 'undefined' ? window.innerHeight : 800;
+        const isMob = screenW <= 640;
+        const cardW = isMob ? Math.min(screenW - 20, 356) : 340;
+        const cardH = isMob ? Math.min(screenH - 105, 480) : 470;
+
         try {
             const saved = localStorage.getItem(STORAGE_WINDOW_POS_KEY);
             if (saved) {
                 const parsed = JSON.parse(saved);
                 if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
-                    const isMobile = typeof window !== 'undefined' && window.innerWidth <= 600;
-                    const sideGap = isMobile ? 18 : 32;
-                    const maxX = Math.max(sideGap, window.innerWidth - 340 - sideGap);
-                    const maxY = Math.max(20, window.innerHeight - 480 - (isMobile ? 86 : 30));
+                    const sideGap = isMob ? 8 : 24;
+                    const bottomNavMargin = isMob ? 70 : 26;
+                    const maxX = Math.max(sideGap, screenW - cardW - sideGap);
+                    const maxY = Math.max(16, screenH - cardH - bottomNavMargin);
                     return {
                         x: Math.min(Math.max(sideGap, parsed.x), maxX),
-                        y: Math.min(Math.max(20, parsed.y), maxY),
+                        y: Math.min(Math.max(16, parsed.y), maxY),
                     };
                 }
             }
         } catch (e) {}
-        const isMobile = typeof window !== 'undefined' && window.innerWidth <= 600;
         return {
-            x: Math.max(16, (typeof window !== 'undefined' ? window.innerWidth : 400) - 355),
-            y: Math.max(20, (typeof window !== 'undefined' ? window.innerHeight : 800) - 490 - (isMobile ? 86 : 30)),
+            x: isMob ? Math.max(8, Math.floor((screenW - cardW) / 2)) : Math.max(16, screenW - 355),
+            y: isMob ? Math.max(16, screenH - cardH - 76) : Math.max(20, screenH - 490 - 30),
         };
     });
 
@@ -346,9 +351,12 @@ export default function AIAssistantBot({ onOpenStreakModal }) {
                 }
             }
         } catch (e) {}
+        const screenW = typeof window !== 'undefined' ? window.innerWidth : 400;
+        const screenH = typeof window !== 'undefined' ? window.innerHeight : 800;
+        const isMob = screenW <= 640;
         return snapFabToSide(
-            (typeof window !== 'undefined' ? window.innerWidth : 400) - 80,
-            (typeof window !== 'undefined' ? window.innerHeight : 800) - 95
+            screenW - (isMob ? 68 : 80),
+            screenH - (isMob ? 82 : 95)
         );
     });
 
@@ -386,21 +394,27 @@ export default function AIAssistantBot({ onOpenStreakModal }) {
         hasMoved: false,
     });
 
-    const touchStartRef = useRef({ x: 0, y: 0, time: 0 });
+    // Ref tracking whether touch/pointer is active inside chat card
+    const isTouchInsideChatRef = useRef(false);
 
     // Keep positions inside viewport on resize
     useEffect(() => {
         const handleResize = () => {
-            const isMobile = window.innerWidth <= 600;
-            const sideGap = isMobile ? 18 : 32;
-            const bottomNavMargin = isMobile ? 86 : 30;
+            const screenW = window.innerWidth;
+            const screenH = window.innerHeight;
+            const isMob = screenW <= 640;
+            setIsMobile(isMob);
+            const sideGap = isMob ? 8 : 24;
+            const bottomNavMargin = isMob ? 70 : 26;
+            const width = chatWindowRef.current?.offsetWidth || (isMob ? Math.min(screenW - 20, 356) : 340);
+            const height = chatWindowRef.current?.offsetHeight || (isMob ? Math.min(screenH - 105, 480) : 470);
 
             setWindowPos(prev => {
-                const maxX = Math.max(sideGap, window.innerWidth - (chatWindowRef.current?.offsetWidth || 340) - sideGap);
-                const maxY = Math.max(20, window.innerHeight - (chatWindowRef.current?.offsetHeight || 440) - bottomNavMargin);
+                const maxX = Math.max(sideGap, screenW - width - sideGap);
+                const maxY = Math.max(16, screenH - height - bottomNavMargin);
                 return {
                     x: Math.min(Math.max(sideGap, prev.x), maxX),
-                    y: Math.min(Math.max(20, prev.y), maxY),
+                    y: Math.min(Math.max(16, prev.y), maxY),
                 };
             });
             setFabPos(prev => snapFabToSide(prev.x, prev.y));
@@ -456,19 +470,26 @@ export default function AIAssistantBot({ onOpenStreakModal }) {
             if (windowDragRef.current.isDragging || fabDragRef.current.isDragging) return;
             if (
                 chatWindowRef.current &&
-                !chatWindowRef.current.contains(event.target)
+                !chatWindowRef.current.contains(event.target) &&
+                (!fabRef.current || !fabRef.current.contains(event.target))
             ) {
                 closeChat(false);
             }
         };
 
         const handleScroll = (event) => {
+            if (windowDragRef.current.isDragging || fabDragRef.current.isDragging) return;
+            // If user is currently touching/interacting inside the chat, do not close
+            if (isTouchInsideChatRef.current) return;
+            // If the scroll target is inside the chat window, do not close
             if (
                 chatWindowRef.current &&
-                !chatWindowRef.current.contains(event.target)
+                (chatWindowRef.current.contains(event.target) || chatWindowRef.current === event.target)
             ) {
-                closeChat(false);
+                return;
             }
+            // Genuine outside background scroll -> dismiss chat
+            closeChat(false);
         };
 
         document.addEventListener('pointerdown', handleOutsidePointer, true);
@@ -478,34 +499,6 @@ export default function AIAssistantBot({ onOpenStreakModal }) {
             document.removeEventListener('scroll', handleScroll, true);
         };
     }, [isOpen, closeChat]);
-
-    const handleTouchStart = (e) => {
-        const touch = e.touches[0];
-        touchStartRef.current = {
-            x: touch.clientX,
-            y: touch.clientY,
-            time: Date.now(),
-        };
-    };
-
-    const handleTouchEnd = (e) => {
-        const touch = e.changedTouches[0];
-        const deltaX = touch.clientX - touchStartRef.current.x;
-        const deltaY = touch.clientY - touchStartRef.current.y;
-        const duration = Date.now() - touchStartRef.current.time;
-
-        if (duration < 600) {
-            if (deltaX > 75 && Math.abs(deltaX) > Math.abs(deltaY) * 1.3) {
-                if (viewMode === 'history') {
-                    setViewMode('chat');
-                } else {
-                    setIsMinimized(true);
-                }
-            } else if (deltaY > 85 && Math.abs(deltaY) > Math.abs(deltaX) * 1.3) {
-                setIsMinimized(true);
-            }
-        }
-    };
 
     useEffect(() => {
         const handleExternalOpen = () => openChat();
@@ -575,17 +568,17 @@ export default function AIAssistantBot({ onOpenStreakModal }) {
         if (!windowDragRef.current.isDragging) return;
         const deltaX = e.clientX - windowDragRef.current.startX;
         const deltaY = e.clientY - windowDragRef.current.startY;
-        const width = chatWindowRef.current?.offsetWidth || 340;
-        const height = chatWindowRef.current?.offsetHeight || 440;
-        const isMobile = window.innerWidth <= 600;
-        const sideGap = isMobile ? 16 : 28;
-        const bottomNavMargin = window.innerWidth <= 768 ? 86 : 26;
+        const isMob = window.innerWidth <= 640;
+        const width = chatWindowRef.current?.offsetWidth || (isMob ? Math.min(window.innerWidth - 20, 356) : 340);
+        const height = chatWindowRef.current?.offsetHeight || (isMob ? Math.min(window.innerHeight - 105, 480) : 470);
+        const sideGap = isMob ? 8 : 24;
+        const bottomNavMargin = isMob ? 70 : 26;
 
         const maxX = Math.max(sideGap, window.innerWidth - width - sideGap);
-        const maxY = Math.max(20, window.innerHeight - height - bottomNavMargin);
+        const maxY = Math.max(16, window.innerHeight - height - bottomNavMargin);
 
         const newX = Math.min(Math.max(sideGap, windowDragRef.current.startPosX + deltaX), maxX);
-        const newY = Math.min(Math.max(20, windowDragRef.current.startPosY + deltaY), maxY);
+        const newY = Math.min(Math.max(16, windowDragRef.current.startPosY + deltaY), maxY);
         setWindowPos({ x: newX, y: newY });
     };
 
@@ -636,13 +629,13 @@ export default function AIAssistantBot({ onOpenStreakModal }) {
         }
 
         if (fabDragRef.current.hasMoved) {
-            const isMobile = window.innerWidth <= 600;
-            const sideGap = isMobile ? 20 : 32;
-            const bottomNavMargin = isMobile ? 86 : 30;
+            const isMob = window.innerWidth <= 640;
+            const sideGap = isMob ? 12 : 28;
+            const bottomNavMargin = isMob ? 74 : 26;
             const maxX = Math.max(sideGap, window.innerWidth - 54 - sideGap);
-            const maxY = Math.max(20, window.innerHeight - 54 - bottomNavMargin);
+            const maxY = Math.max(16, window.innerHeight - 54 - bottomNavMargin);
             const newX = Math.min(Math.max(sideGap, fabDragRef.current.startPosX + deltaX), maxX);
-            const newY = Math.min(Math.max(20, fabDragRef.current.startPosY + deltaY), maxY);
+            const newY = Math.min(Math.max(16, fabDragRef.current.startPosY + deltaY), maxY);
             setFabPos({ x: newX, y: newY });
         }
     };
@@ -1132,15 +1125,22 @@ export default function AIAssistantBot({ onOpenStreakModal }) {
             {isOpen && (
                 <div
                     ref={chatWindowRef}
-                    className={`aura-window ${isMinimized ? 'minimized' : ''} ${isMobile ? 'mobile-fullscreen' : ''}`}
-                    style={isMobile ? undefined : {
+                    className={`aura-window ${isMinimized ? 'minimized' : ''}`}
+                    style={{
                         left: `${windowPos.x}px`,
                         top: `${windowPos.y}px`,
                         right: 'auto',
                         bottom: 'auto',
                     }}
-                    onTouchStart={handleTouchStart}
-                    onTouchEnd={handleTouchEnd}
+                    onPointerDownCapture={() => {
+                        isTouchInsideChatRef.current = true;
+                    }}
+                    onPointerUpCapture={() => {
+                        isTouchInsideChatRef.current = false;
+                    }}
+                    onPointerCancelCapture={() => {
+                        isTouchInsideChatRef.current = false;
+                    }}
                 >
                     {isMinimized ? (
                         /* ULTRA-SLEEK MINIMIZED PILL: ABSOLUTELY ZERO ELEMENT OVERLAPPING */
@@ -1318,7 +1318,7 @@ export default function AIAssistantBot({ onOpenStreakModal }) {
 
                             {/* VIEW MODE 1: CHAT HISTORY PANEL */}
                             {viewMode === 'history' ? (
-                                <div className="aura-history-view">
+                                <div className="aura-history-view" onScroll={(e) => e.stopPropagation()}>
                                     <div className="aura-history-header">
                                         <div className="aura-history-header-title">
                                             <History size={16} />
@@ -1425,7 +1425,7 @@ export default function AIAssistantBot({ onOpenStreakModal }) {
                                         </div>
                                     )}
 
-                                    <div className="aura-messages" ref={messagesContainerRef}>
+                                    <div className="aura-messages" ref={messagesContainerRef} onScroll={(e) => e.stopPropagation()}>
                                         {messages.map((msg) => (
                                             <div
                                                 key={msg.id}
@@ -1736,24 +1736,23 @@ export default function AIAssistantBot({ onOpenStreakModal }) {
                 </div>
             )}
 
-            {/* FLOATING FAB BUTTON (DESKTOP DRAGGABLE, MOBILE DOCKED ABOVE BOTTOM NAV) */}
+            {/* FLOATING FAB BUTTON (MOVABLE & DRAGGABLE ANYWHERE ON MOBILE & DESKTOP) */}
             {!isOpen && (
                 <button
                     ref={fabRef}
                     type="button"
-                    className={`aura-fab ${isDraggingFab ? 'dragging' : ''} ${isMobile ? 'mobile-docked' : ''}`}
-                    style={isMobile ? undefined : {
+                    className={`aura-fab ${isDraggingFab ? 'dragging' : ''}`}
+                    style={{
                         left: `${fabPos.x}px`,
                         top: `${fabPos.y}px`,
                         right: 'auto',
                         bottom: 'auto',
                     }}
-                    onPointerDown={isMobile ? undefined : handleFabPointerDown}
-                    onPointerMove={isMobile ? undefined : handleFabPointerMove}
-                    onPointerUp={isMobile ? undefined : handleFabPointerUp}
-                    onClick={isMobile ? openChat : undefined}
+                    onPointerDown={handleFabPointerDown}
+                    onPointerMove={handleFabPointerMove}
+                    onPointerUp={handleFabPointerUp}
                     aria-label="Open Aura AI assistant"
-                    title={isMobile ? "Chat with Aura" : "Chat with Aura • Drag to snap left or right"}
+                    title="Chat with Aura • Drag to snap left or right"
                 >
                     <GeminiIcon size={26} className="aura-gemini-logo" />
                 </button>

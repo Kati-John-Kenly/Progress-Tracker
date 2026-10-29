@@ -1,6 +1,6 @@
-const buildId = 'mvrzbf2r';
+const buildId = 'mvt2sq44';
 const cacheName = `progress-app-${buildId}`;
-const precacheUrls = JSON.parse('["/","/index.html","/manifest.webmanifest","/pwa-icon.png","/favicon.png","/assets/index-DB6a9qas.js","/assets/pdf-B21G9UOt.js","/assets/xlsx-CuSbHU4R.js","/assets/index-D43wkTtX.css","/assets/pdf.worker.min-CjEcRF4W.mjs"]');
+const precacheUrls = JSON.parse('["/","/index.html","/manifest.webmanifest","/pwa-icon.png","/favicon.png","/assets/index-olevn9-T.js","/assets/pdf-Dl_GWeXh.js","/assets/xlsx-CuSbHU4R.js","/assets/index-BpqtvVA8.css","/assets/pdf.worker.min-CjEcRF4W.mjs"]');
 
 globalThis.addEventListener('install', (event) => {
     event.waitUntil(
